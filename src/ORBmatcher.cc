@@ -402,8 +402,20 @@ int ORBmatcher::SearchByProjection(KeyFrame* pKF, cv::Mat Scw, const vector<MapP
     return nmatches;
 }
 
+/**
+ * @brief 在第1帧和第2帧之间寻找匹配的特征点
+ * FIXME: 特征点的匹配方法有待进一步分析
+ * 
+ * @param F1 第1帧
+ * @param F2 第2帧
+ * @param vbPrevMatched 第1帧与其前一帧之间匹配的特征点，如果第1帧是初始帧，则是第1帧全部的特征点 
+ * @param vnMatches12 第1、2帧之间匹配的特征点
+ * @param windowSize 
+ * @return int 匹配的特征点数量
+ */
 int ORBmatcher::SearchForInitialization(Frame &F1, Frame &F2, vector<cv::Point2f> &vbPrevMatched, vector<int> &vnMatches12, int windowSize)
 {
+    /* 初始化输出变量 */
     int nmatches=0;
     vnMatches12 = vector<int>(F1.mvKeysUn.size(),-1);
 

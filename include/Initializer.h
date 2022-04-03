@@ -85,12 +85,15 @@ private:
     // Calibration
     cv::Mat mK;
 
+    /* 标准差和方差 */
     // Standard Deviation and Variance
     float mSigma, mSigma2;
 
+    /* 随机采样一致最大迭代次数 */
     // Ransac max iterations
     int mMaxIterations;
 
+    /* 随机采样一致集合 */
     // Ransac sets
     vector<vector<size_t> > mvSets;   
 

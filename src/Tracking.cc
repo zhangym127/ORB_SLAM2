@@ -37,12 +37,31 @@
 
 #include<mutex>
 
+// 程序中变量名的第一个字母如果为"m"则表示为类中的成员变量，member
+// 第一个、第二个字母:
+// "p"表示指针数据类型
+// "n"表示int类型
+// "b"表示bool类型
+// "s"表示set类型
+// "v"表示vector数据类型
+// 'l'表示list数据类型
+// "KF"表示KeyPoint数据类型
 
 using namespace std;
 
 namespace ORB_SLAM2
 {
 
+/** @brief 初始化跟踪线程
+  * @param pSys SLAM系统
+  * @param pVoc 词典
+  * @param pFrameDrawer 帧抽屉
+  * @param pMapDrawer Map抽屉
+  * @param pMap Map
+  * @param pKFDB 关键帧数据库
+  * @param strSettingPath 设置文件路径
+  * @param sensor 传感器类型
+  */
 Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer, MapDrawer *pMapDrawer, Map *pMap, KeyFrameDatabase* pKFDB, const string &strSettingPath, const int sensor):
     mState(NO_IMAGES_YET), mSensor(sensor), mbOnlyTracking(false), mbVO(false), mpORBVocabulary(pVoc),
     mpKeyFrameDB(pKFDB), mpInitializer(static_cast<Initializer*>(NULL)), mpSystem(pSys), mpViewer(NULL),
@@ -56,6 +75,9 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
     float cx = fSettings["Camera.cx"];
     float cy = fSettings["Camera.cy"];
 
+    //     |fx  0   cx|
+    // K = |0   fy  cy|
+    //     |0   0   1 |
     cv::Mat K = cv::Mat::eye(3,3,CV_32F);
     K.at<float>(0,0) = fx;
     K.at<float>(1,1) = fy;
@@ -63,6 +85,8 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
     K.at<float>(1,2) = cy;
     K.copyTo(mK);
 
+    // 图像矫正系数
+    // [k1 k2 p1 p2 k3]
     cv::Mat DistCoef(4,1,CV_32F);
     DistCoef.at<float>(0) = fSettings["Camera.k1"];
     DistCoef.at<float>(1) = fSettings["Camera.k2"];
@@ -110,17 +134,25 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
 
     // Load ORB parameters
 
+    /* 每一帧提取的特征点数量：1000 */
     int nFeatures = fSettings["ORBextractor.nFeatures"];
+    /* 建立图像金字塔时的缩放比例：1.2 */
     float fScaleFactor = fSettings["ORBextractor.scaleFactor"];
+    /* 建立图像金字塔的层数：8 */
     int nLevels = fSettings["ORBextractor.nLevels"];
+    /* 提取fast特征点的默认阈值：20 */
     int fIniThFAST = fSettings["ORBextractor.iniThFAST"];
+    /* 如果默认阈值提取不出足够fast特征点，则使用最小阈值：8 */
     int fMinThFAST = fSettings["ORBextractor.minThFAST"];
 
+    /* 创建左侧ORB特征提取器 */
     mpORBextractorLeft = new ORBextractor(nFeatures,fScaleFactor,nLevels,fIniThFAST,fMinThFAST);
 
+    /* 如果是双目，则创建右侧ORB特征提取器 */
     if(sensor==System::STEREO)
         mpORBextractorRight = new ORBextractor(nFeatures,fScaleFactor,nLevels,fIniThFAST,fMinThFAST);
 
+    /* 对于单目，创建初始化时使用的特征提取器，主要区别是特征点数量翻了一番，变成了2000 */
     if(sensor==System::MONOCULAR)
         mpIniORBextractor = new ORBextractor(2*nFeatures,fScaleFactor,nLevels,fIniThFAST,fMinThFAST);
 
@@ -234,11 +266,16 @@ cv::Mat Tracking::GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, const d
     return mCurrentFrame.mTcw.clone();
 }
 
-
+/** @brief 处理一帧单目图像
+  * @param im [in] 单目图像
+  * @param timestamp [in] 图像对应的时间戳
+  * @return 该帧图像对应的相机位姿，主要用于viewer等显示观察之用
+  */
 cv::Mat Tracking::GrabImageMonocular(const cv::Mat &im, const double &timestamp)
 {
     mImGray = im;
 
+    /* 图像转成灰度图 */
     if(mImGray.channels()==3)
     {
         if(mbRGB)
@@ -254,16 +291,22 @@ cv::Mat Tracking::GrabImageMonocular(const cv::Mat &im, const double &timestamp)
             cvtColor(mImGray,mImGray,CV_BGRA2GRAY);
     }
 
+    /* 构造当前Frame：mCurrentFrame，提取特征点，畸变校正，分配到64×48的网格mGrid中 */
     if(mState==NOT_INITIALIZED || mState==NO_IMAGES_YET)
         mCurrentFrame = Frame(mImGray,timestamp,mpIniORBextractor,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth);
     else
         mCurrentFrame = Frame(mImGray,timestamp,mpORBextractorLeft,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth);
 
+    /* 跟踪，应该是计算出当前相机的位姿mTcw */
     Track();
 
+    /* 返回当前帧对应的相机位姿，主要用于viewer等显示观察之用 */
     return mCurrentFrame.mTcw.clone();
 }
 
+/**
+ * @brief 主跟踪线程，与具体的传感器无关
+ */
 void Tracking::Track()
 {
     if(mState==NO_IMAGES_YET)
@@ -278,6 +321,12 @@ void Tracking::Track()
 
     if(mState==NOT_INITIALIZED)
     {
+        /**
+         * 步骤1：初始化，对于单目：
+         * 1.找到初始帧和当前帧之间匹配的特征点
+         * 2.基于匹配的特征点找到当前帧的位姿
+         * 3.建立初始的单目地图，将mState设置成OK
+         */
         if(mSensor==System::STEREO || mSensor==System::RGBD)
             StereoInitialization();
         else
@@ -288,11 +337,15 @@ void Tracking::Track()
         if(mState!=OK)
             return;
     }
-    else
+    else /* 步骤2：跟踪 */
     {
         // System is initialized. Track Frame.
         bool bOK;
 
+        /**
+         * mbOnlyTracking等于false表示正常VO模式（有地图更新），等于true表示用户手动选择定位模式
+         * 在viewer中有个开关menuLocalizationMode，有它控制是否ActivateLocalizationMode，并最终管控mbOnlyTracking
+         */
         // Initial camera pose estimation using motion model or relocalization (if tracking is lost)
         if(!mbOnlyTracking)
         {
@@ -320,7 +373,7 @@ void Tracking::Track()
                 bOK = Relocalization();
             }
         }
-        else
+        else // 纯定位模式，地图不更新
         {
             // Localization Mode: Local Mapping is deactivated
 
@@ -560,16 +613,26 @@ void Tracking::StereoInitialization()
     }
 }
 
+/**
+ * @brief 单目跟踪初始化
+ * 
+ * 1.基于当前帧和参考帧之间的匹配特征点
+ * 2.找出当前帧的位置和姿态
+ * 3.创建初始的单目地图
+ */
 void Tracking::MonocularInitialization()
 {
-
+    /* 创建初始化程序 */
     if(!mpInitializer)
     {
         // Set Reference Frame
         if(mCurrentFrame.mvKeys.size()>100)
         {
+            /* 得到初始化的第一帧，初始化需要两帧 */
             mInitialFrame = Frame(mCurrentFrame);
+            /* 记录最近的一帧 */
             mLastFrame = Frame(mCurrentFrame);
+            /* 将当前帧中的特征点作为初始的匹配上的特征点 */
             mvbPrevMatched.resize(mCurrentFrame.mvKeysUn.size());
             for(size_t i=0; i<mCurrentFrame.mvKeysUn.size(); i++)
                 mvbPrevMatched[i]=mCurrentFrame.mvKeysUn[i].pt;
@@ -577,8 +640,10 @@ void Tracking::MonocularInitialization()
             if(mpInitializer)
                 delete mpInitializer;
 
+            /* 创建初始化程序，设置Ransac标准差1.0（即1个像素），最大迭代次数200 */
             mpInitializer =  new Initializer(mCurrentFrame,1.0,200);
 
+            /* 将初始匹配向量清空 */
             fill(mvIniMatches.begin(),mvIniMatches.end(),-1);
 
             return;
@@ -587,6 +652,9 @@ void Tracking::MonocularInitialization()
     else
     {
         // Try to initialize
+        /* 如果当前帧的特征点数大于100，则获得单目初始化的第二帧，开始初始化
+         * 如果特征点数量小于100，则重新生成初始化程序 
+         * 因此只有连续两帧特征点数大于100才能启动初始化*/
         if((int)mCurrentFrame.mvKeys.size()<=100)
         {
             delete mpInitializer;
@@ -596,10 +664,14 @@ void Tracking::MonocularInitialization()
         }
 
         // Find correspondences
+        // 在mCurrentFrame和mInitialFrame中找到匹配的特征点对，保存在mvIniMatches中
+        // mvbPrevMatched保存前一帧匹配的特征点
+        // mvIniMatches存储mInitialFrame,mCurrentFrame之间匹配的特征点
         ORBmatcher matcher(0.9,true);
         int nmatches = matcher.SearchForInitialization(mInitialFrame,mCurrentFrame,mvbPrevMatched,mvIniMatches,100);
 
         // Check if there are enough correspondences
+        // 如果两帧之间匹配的点太少，则重新生成初始化程序
         if(nmatches<100)
         {
             delete mpInitializer;
@@ -607,10 +679,11 @@ void Tracking::MonocularInitialization()
             return;
         }
 
-        cv::Mat Rcw; // Current Camera Rotation
-        cv::Mat tcw; // Current Camera Translation
+        cv::Mat Rcw; // Current Camera Rotation 当前帧的旋转R
+        cv::Mat tcw; // Current Camera Translation 当前帧的平移t
         vector<bool> vbTriangulated; // Triangulated Correspondences (mvIniMatches)
 
+        /* 基于当前帧和参考帧之间的匹配点，找出当前帧相对于参考帧的旋转R和平移t */
         if(mpInitializer->Initialize(mCurrentFrame, mvIniMatches, Rcw, tcw, mvIniP3D, vbTriangulated))
         {
             for(size_t i=0, iend=mvIniMatches.size(); i<iend;i++)
@@ -623,17 +696,26 @@ void Tracking::MonocularInitialization()
             }
 
             // Set Frame Poses
+            /* 设置初始帧的位姿：单位矩阵 */
             mInitialFrame.SetPose(cv::Mat::eye(4,4,CV_32F));
-            cv::Mat Tcw = cv::Mat::eye(4,4,CV_32F);
+            /* 设置当前帧的位姿：Rt */
+            cv::Mat Tcw = cv::Mat::eye(4,4,CV_32F); //当前的相机位姿变换
             Rcw.copyTo(Tcw.rowRange(0,3).colRange(0,3));
             tcw.copyTo(Tcw.rowRange(0,3).col(3));
             mCurrentFrame.SetPose(Tcw);
 
+            /* 创建初始的单目地图 */
             CreateInitialMapMonocular();
         }
     }
 }
 
+/**
+ * @brief 创建初始的单目地图
+ * 
+ * 
+ * 4.将mState设置成OK
+ */
 void Tracking::CreateInitialMapMonocular()
 {
     // Create KeyFrames

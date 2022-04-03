@@ -170,7 +170,17 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeSt
     AssignFeaturesToGrid();
 }
 
-
+/** @brief Frame构造函数之一
+ *    构造帧：提取特征点，畸变校正，分配到64×48的网格mGrid中
+  * @param imGray 灰度图
+  * @param timestamp 图像对应的时间戳
+  * @param extractor 特征点提取器
+  * @param voc ORB词典
+  * @param K 相机参数矩阵
+  * @param distCoef 畸变校正参数
+  * @param bf 红外投射器基线时间，深度相机内置红外投射器，投射不可见的红外纹理，避免大面积白墙等纹理不明显的场景下提取不到特征点。
+  * @param thDepth 深度阈值
+  */
 Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extractor,ORBVocabulary* voc, cv::Mat &K, cv::Mat &distCoef, const float &bf, const float &thDepth)
     :mpORBvocabulary(voc),mpORBextractorLeft(extractor),mpORBextractorRight(static_cast<ORBextractor*>(NULL)),
      mTimeStamp(timeStamp), mK(K.clone()),mDistCoef(distCoef.clone()), mbf(bf), mThDepth(thDepth)
@@ -178,6 +188,7 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
     // Frame ID
     mnId=nNextId++;
 
+    /* 特征点提取参数 */
     // Scale Level Info
     mnScaleLevels = mpORBextractorLeft->GetLevels();
     mfScaleFactor = mpORBextractorLeft->GetScaleFactor();
@@ -187,14 +198,17 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
     mvLevelSigma2 = mpORBextractorLeft->GetScaleSigmaSquares();
     mvInvLevelSigma2 = mpORBextractorLeft->GetInverseScaleSigmaSquares();
 
+    /* 提取ORB特征点，特征点保存在mvKeys中 */
     // ORB extraction
     ExtractORB(0,imGray);
 
+    /* N是特征点总数 */
     N = mvKeys.size();
 
     if(mvKeys.empty())
         return;
 
+    /* 进行畸变校正 */
     UndistortKeyPoints();
 
     // Set no stereo information
@@ -207,6 +221,7 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
     // This is done only for the first Frame (or after a change in the calibration)
     if(mbInitialComputations)
     {
+        /* 由于畸变校正的原因，重新计算图像边界 */
         ComputeImageBounds(imGray);
 
         mfGridElementWidthInv=static_cast<float>(FRAME_GRID_COLS)/static_cast<float>(mnMaxX-mnMinX);
@@ -224,22 +239,27 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
 
     mb = mbf/fx;
 
+    /* 将特征点分配到64×48的网格mGrid中 */
     AssignFeaturesToGrid();
 }
 
 void Frame::AssignFeaturesToGrid()
 {
+    /* 确定每个格子的容量，N是特征点总数 */
     int nReserve = 0.5f*N/(FRAME_GRID_COLS*FRAME_GRID_ROWS);
     for(unsigned int i=0; i<FRAME_GRID_COLS;i++)
         for (unsigned int j=0; j<FRAME_GRID_ROWS;j++)
             mGrid[i][j].reserve(nReserve);
 
+    /* 将特征点分配到网格 */
     for(int i=0;i<N;i++)
     {
         const cv::KeyPoint &kp = mvKeysUn[i];
 
         int nGridPosX, nGridPosY;
+        /* 根据特征点坐标计算出网格坐标 */
         if(PosInGrid(kp,nGridPosX,nGridPosY))
+            /* 特征点填入网格64×48的网格mGrid中 */
             mGrid[nGridPosX][nGridPosY].push_back(i);
     }
 }
@@ -401,6 +421,12 @@ void Frame::ComputeBoW()
     }
 }
 
+/**
+ * @brief 对提取的特征点进行畸变校正
+ * 使用OpenCV的undistortPoints()方法进行畸变校正
+ * @param mvKeys 待校正的特征点
+ * @param mvKeysUn 完成畸变校正的特征点
+ */
 void Frame::UndistortKeyPoints()
 {
     if(mDistCoef.at<float>(0)==0.0)
@@ -409,6 +435,7 @@ void Frame::UndistortKeyPoints()
         return;
     }
 
+    /* 将特征点填充到两列的像素矩阵mat中 */
     // Fill matrix with points
     cv::Mat mat(N,2,CV_32F);
     for(int i=0; i<N; i++)
@@ -417,11 +444,13 @@ void Frame::UndistortKeyPoints()
         mat.at<float>(i,1)=mvKeys[i].pt.y;
     }
 
+    /* 调用OpenCV进行畸变校正 */
     // Undistort points
     mat=mat.reshape(2);
     cv::undistortPoints(mat,mat,mK,mDistCoef,cv::Mat(),mK);
     mat=mat.reshape(1);
 
+    /* 将校正后的特征点存储到mvKeysUn中 */
     // Fill undistorted keypoint vector
     mvKeysUn.resize(N);
     for(int i=0; i<N; i++)

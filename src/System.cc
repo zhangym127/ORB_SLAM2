@@ -29,6 +29,12 @@
 namespace ORB_SLAM2
 {
 
+/** @brief 创建SLAM系统，初始化所有的系统线程，准备处理图像帧
+  * @param strVocFile 词典文件路径名
+  * @param strSettingsFile 设置文件路径名
+  * @param sensor 传感器类型：单目、双目、RGB-D
+  * @param bUseViewer 是否使用视图
+  */
 System::System(const string &strVocFile, const string &strSettingsFile, const eSensor sensor,
                const bool bUseViewer):mSensor(sensor), mpViewer(static_cast<Viewer*>(NULL)), mbReset(false),mbActivateLocalizationMode(false),
         mbDeactivateLocalizationMode(false)
@@ -215,6 +221,11 @@ cv::Mat System::TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const doub
     return Tcw;
 }
 
+/** @brief 输送一帧图像到SLAM系统进行处理
+  * @param im 图像
+  * @param timestamp 图像对应的时间戳
+  * @return 该帧图像对应的相机位姿
+  */
 cv::Mat System::TrackMonocular(const cv::Mat &im, const double &timestamp)
 {
     if(mSensor!=MONOCULAR)
@@ -257,6 +268,7 @@ cv::Mat System::TrackMonocular(const cv::Mat &im, const double &timestamp)
     }
     }
 
+    /* 处理一帧单目图像，获得对应的相机位姿 */
     cv::Mat Tcw = mpTracker->GrabImageMonocular(im,timestamp);
 
     unique_lock<mutex> lock2(mMutexState);
@@ -264,6 +276,7 @@ cv::Mat System::TrackMonocular(const cv::Mat &im, const double &timestamp)
     mTrackedMapPoints = mpTracker->mCurrentFrame.mvpMapPoints;
     mTrackedKeyPointsUn = mpTracker->mCurrentFrame.mvKeysUn;
 
+    /* 返回相机位姿 */
     return Tcw;
 }
 
