@@ -105,6 +105,18 @@ static float IC_Angle(const Mat& image, Point2f pt,  const vector<int> & u_max)
 
 
 const float factorPI = (float)(CV_PI/180.f);
+/**
+ * @brief 为特征点创建BRIEF描述符
+ * 
+ * 在特征点周围通过一种选定的pattern挑选出n=256个点对，对每个点对的亮度值（t0和t1）进行比较，
+ * 用描述符中的1个bit存放每个点对的比较结果，如果t0<t1，值为1，否则为0，最后形成一个长度为256
+ * 的描述符。
+ * 
+ * @param kpt[in] 特征点
+ * @param img[in] 图像
+ * @param pattern[] BRIEF的提取模板，保存的是一组一组的坐标值
+ * @param desc[out] 创建好的BRIEF特征描述符
+ */
 static void computeOrbDescriptor(const KeyPoint& kpt,
                                  const Mat& img, const Point* pattern,
                                  uchar* desc)
@@ -112,6 +124,7 @@ static void computeOrbDescriptor(const KeyPoint& kpt,
     float angle = (float)kpt.angle*factorPI;
     float a = (float)cos(angle), b = (float)sin(angle);
 
+    /* 取出图像中特征点对应的像素值 */
     const uchar* center = &img.at<uchar>(cvRound(kpt.pt.y), cvRound(kpt.pt.x));
     const int step = (int)img.step;
 
@@ -762,6 +775,13 @@ vector<cv::KeyPoint> ORBextractor::DistributeOctTree(const vector<cv::KeyPoint>&
     return vResultKeys;
 }
 
+/**
+ * @brief 提取图像的FAST特征点
+ * 
+ * 对图像金字塔中的每一层进行FAST特征点的提取
+ * 
+ * @param allKeypoints[out] FAST特征点，通过二维vector向量分层保存
+ */
 void ORBextractor::ComputeKeyPointsOctTree(vector<vector<KeyPoint> >& allKeypoints)
 {
     allKeypoints.resize(nlevels);
@@ -1031,15 +1051,37 @@ void ORBextractor::ComputeKeyPointsOld(std::vector<std::vector<KeyPoint> > &allK
         computeOrientation(mvImagePyramid[level], allKeypoints[level], umax);
 }
 
+/**
+ * @brief 为图像中的每个特征点创建BRIEF描述符
+ * @param image[in] 图像
+ * @param keypoints[in] 特征点
+ * @param descriptors[out] 计算出的BRIEF描述符
+ * @param pattern[] BRIEF的提取模板，保存的是一组一组的坐标值
+ */
 static void computeDescriptors(const Mat& image, vector<KeyPoint>& keypoints, Mat& descriptors,
                                const vector<Point>& pattern)
 {
+    /* 为描述符分配空间并清零 */
+    /** FIXME: 在ORBextractor::operator()中已经为descriptors分配过一次空间了，为什么这里要再次分配？ */
     descriptors = Mat::zeros((int)keypoints.size(), 32, CV_8UC1);
 
+    /* 为每个特征点创建描述符，将存放该描述符的空间指针传进去 */
     for (size_t i = 0; i < keypoints.size(); i++)
         computeOrbDescriptor(keypoints[i], image, &pattern[0], descriptors.ptr((int)i));
 }
 
+/**
+ * @brief 提取图像的ORB特征点
+ * 
+ * 1. 建立图像金字塔，保存在mvImagePyramid中
+ * 2. 提取图像的FAST特征点
+ * 3. 计算FAST特征点对应的BRIFF描述符
+ * 
+ * @param _image[in] 待提取特征点的图像
+ * @param _mask[in] 未使用
+ * @param _keypoints[out] 提取到的FAST特征点
+ * @param _descriptors[out] 特征点对应的BRIFF描述符
+ */
 void ORBextractor::operator()( InputArray _image, InputArray _mask, vector<KeyPoint>& _keypoints,
                       OutputArray _descriptors)
 { 
@@ -1049,15 +1091,20 @@ void ORBextractor::operator()( InputArray _image, InputArray _mask, vector<KeyPo
     Mat image = _image.getMat();
     assert(image.type() == CV_8UC1 );
 
+    /* 第一步：建立图像金字塔，保存在mvImagePyramid中 */
     // Pre-compute the scale pyramid
     ComputePyramid(image);
 
+    /* 第二步：提取图像的FAST特征点 */
     vector < vector<KeyPoint> > allKeypoints;
     ComputeKeyPointsOctTree(allKeypoints);
     //ComputeKeyPointsOld(allKeypoints);
 
+    /* 第三步：计算FAST特征点对应的BRIFF描述符 */
+
     Mat descriptors;
 
+    /* 统计金字塔各层的特征点总数n */
     int nkeypoints = 0;
     for (int level = 0; level < nlevels; ++level)
         nkeypoints += (int)allKeypoints[level].size();
@@ -1065,6 +1112,9 @@ void ORBextractor::operator()( InputArray _image, InputArray _mask, vector<KeyPo
         _descriptors.release();
     else
     {
+        /**
+         * @brief 为BRIFF描述符创建一块nkeypoints*32*8的空间，nkeypoints是特征点总数，然后将空间地址交给descriptors。
+         * 那么描述符的行数即特征点数，描述符的每一行即row()是32*8=256bit，一行对应一个特征点。  */
         _descriptors.create(nkeypoints, 32, CV_8U);
         descriptors = _descriptors.getMat();
     }
@@ -1072,9 +1122,11 @@ void ORBextractor::operator()( InputArray _image, InputArray _mask, vector<KeyPo
     _keypoints.clear();
     _keypoints.reserve(nkeypoints);
 
+    /* 遍历金字塔的每一层，计算BRIFF描述符 */
     int offset = 0;
     for (int level = 0; level < nlevels; ++level)
     {
+        /* 取得金字塔当前层的特征点数 */
         vector<KeyPoint>& keypoints = allKeypoints[level];
         int nkeypointsLevel = (int)keypoints.size();
 
@@ -1082,15 +1134,24 @@ void ORBextractor::operator()( InputArray _image, InputArray _mask, vector<KeyPo
             continue;
 
         // preprocess the resized image
+
+        /* 将这一层的金字塔的图像复制一份交给workingMat */
         Mat workingMat = mvImagePyramid[level].clone();
+
+        /* 对这一层的图像进行高斯模糊 */
         GaussianBlur(workingMat, workingMat, Size(7, 7), 2, 2, BORDER_REFLECT_101);
 
+        /* 将这一层图像对应的描述符内存空间指针交给desc，进行描述符的计算和存放 */
         // Compute the descriptors
         Mat desc = descriptors.rowRange(offset, offset + nkeypointsLevel);
+    
+        /* 计算这一层图像的BRIFF描述符 */
         computeDescriptors(workingMat, keypoints, desc, pattern);
 
+        /* offset用于指示不同层的描述符空间，准备访问下一层描述符 */
         offset += nkeypointsLevel;
 
+        /* 根据特征点所在的金字塔层，将特征点坐标乘以对应的缩放系数 */
         // Scale keypoint coordinates
         if (level != 0)
         {
@@ -1099,11 +1160,19 @@ void ORBextractor::operator()( InputArray _image, InputArray _mask, vector<KeyPo
                  keypointEnd = keypoints.end(); keypoint != keypointEnd; ++keypoint)
                 keypoint->pt *= scale;
         }
+        /* 将这一层的特征点添加到输出特征点中 */
         // And add the keypoints to the output
         _keypoints.insert(_keypoints.end(), keypoints.begin(), keypoints.end());
     }
 }
 
+/**
+ * @brief 建立图像金字塔
+ * 
+ * 建好的图像金字塔保存在mvImagePyramid中
+ * 
+ * @param image 输入图像
+ */
 void ORBextractor::ComputePyramid(cv::Mat image)
 {
     for (int level = 0; level < nlevels; ++level)

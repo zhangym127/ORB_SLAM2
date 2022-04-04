@@ -37,6 +37,11 @@ void Map::AddKeyFrame(KeyFrame *pKF)
         mnMaxKFid=pKF->mnId;
 }
 
+/**
+ * @brief 添加3D空间点到Map
+ * 
+ * @param pMP 3D空间点
+ */
 void Map::AddMapPoint(MapPoint *pMP)
 {
     unique_lock<mutex> lock(mMutexMap);

@@ -681,13 +681,14 @@ void Tracking::MonocularInitialization()
 
         cv::Mat Rcw; // Current Camera Rotation 当前帧的旋转R
         cv::Mat tcw; // Current Camera Translation 当前帧的平移t
-        vector<bool> vbTriangulated; // Triangulated Correspondences (mvIniMatches)
+        vector<bool> vbTriangulated; // Triangulated Correspondences (mvIniMatches) 指示mvIniMatches中通过三角化以及重投影检验的特征点对
 
-        /* 基于当前帧和参考帧之间的匹配点，找出当前帧相对于参考帧的旋转R和平移t */
+        /* 基于当前帧和参考帧之间的匹配点，找出当前帧相对于参考帧的旋转R和平移t，还原出3D空间点 */
         if(mpInitializer->Initialize(mCurrentFrame, mvIniMatches, Rcw, tcw, mvIniP3D, vbTriangulated))
         {
             for(size_t i=0, iend=mvIniMatches.size(); i<iend;i++)
             {
+                /* 剔除mvIniMatches中未通过三角化检验的特征点对儿 */
                 if(mvIniMatches[i]>=0 && !vbTriangulated[i])
                 {
                     mvIniMatches[i]=-1;
@@ -714,50 +715,63 @@ void Tracking::MonocularInitialization()
  * @brief 创建初始的单目地图
  * 
  * 
- * 4.将mState设置成OK
+ * 4.将mState设置成OK，表征初始化完成
  */
 void Tracking::CreateInitialMapMonocular()
 {
+    /* 创建关键帧 */
     // Create KeyFrames
     KeyFrame* pKFini = new KeyFrame(mInitialFrame,mpMap,mpKeyFrameDB);
     KeyFrame* pKFcur = new KeyFrame(mCurrentFrame,mpMap,mpKeyFrameDB);
 
-
+    /* 创建关键帧的词袋 */
     pKFini->ComputeBoW();
     pKFcur->ComputeBoW();
 
+    /* 将关键帧插入到Map中 */
     // Insert KFs in the map
     mpMap->AddKeyFrame(pKFini);
     mpMap->AddKeyFrame(pKFcur);
 
+    /* 遍历每一个通过检验的特征点对儿，将对应的3D空间点添加到Map */
     // Create MapPoints and asscoiate to keyframes
     for(size_t i=0; i<mvIniMatches.size();i++)
     {
         if(mvIniMatches[i]<0)
             continue;
 
+        //为每一个3D空间点创建一个Map点
         //Create MapPoint.
         cv::Mat worldPos(mvIniP3D[i]);
 
         MapPoint* pMP = new MapPoint(worldPos,pKFcur,mpMap);
 
+        /* 建立从关键帧到Map点的映射关系 */
         pKFini->AddMapPoint(pMP,i);
         pKFcur->AddMapPoint(pMP,mvIniMatches[i]);
 
+        /* 为Map点添加该关键帧对应的观察 */
         pMP->AddObservation(pKFini,i);
         pMP->AddObservation(pKFcur,mvIniMatches[i]);
 
+        /* 更新独特描述符 */
         pMP->ComputeDistinctiveDescriptors();
         pMP->UpdateNormalAndDepth();
 
+        /* 填写当前帧的Map点以及离点结构 */
         //Fill Current Frame structure
         mCurrentFrame.mvpMapPoints[mvIniMatches[i]] = pMP;
         mCurrentFrame.mvbOutlier[mvIniMatches[i]] = false;
 
+        /* 添加Map点到Map */
         //Add to Map
         mpMap->AddMapPoint(pMP);
     }
 
+    /**
+     * 更新关键帧间的连接关系，对于一个新创建的关键帧都会执行一次关键连接关系更新
+     * 在关键帧之间建立边，每个边有一个权重，边的权重是两帧之间拥有的共视3D点的个数
+     */
     // Update Connections
     pKFini->UpdateConnections();
     pKFcur->UpdateConnections();

@@ -198,7 +198,7 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
     mvLevelSigma2 = mpORBextractorLeft->GetScaleSigmaSquares();
     mvInvLevelSigma2 = mpORBextractorLeft->GetInverseScaleSigmaSquares();
 
-    /* 提取ORB特征点，特征点保存在mvKeys中 */
+    /* 提取ORB特征点，FAST特征点保存在mvKeys中，BRIFF描述符保存在mDescriptors中 */
     // ORB extraction
     ExtractORB(0,imGray);
 
@@ -264,8 +264,19 @@ void Frame::AssignFeaturesToGrid()
     }
 }
 
+/**
+ * @brief 提取图像的ORB特征点
+ * 
+ * 1. 建立图像金字塔，保存在mvImagePyramid中
+ * 2. 提取图像的FAST特征点，保存在mvKeys中
+ * 3. 计算FAST特征点对应的BRIFF描述符，保存在mDescriptors中
+ * 
+ * @param flag 为0提取左侧特征点，否则提取立体视觉的右侧特征点
+ * @param im[in] 待提取特征点的图像 
+ */
 void Frame::ExtractORB(int flag, const cv::Mat &im)
 {
+    /* 下面的特征点提取使用的是函数指针，实际调用的是ORBextractor::operator()方法，第二个参数未使用，无意义 */
     if(flag==0)
         (*mpORBextractorLeft)(im,cv::Mat(),mvKeys,mDescriptors);
     else

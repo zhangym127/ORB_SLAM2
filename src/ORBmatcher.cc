@@ -1656,6 +1656,13 @@ void ORBmatcher::ComputeThreeMaxima(vector<int>* histo, const int L, int &ind1, 
 
 // Bit set count operation from
 // http://graphics.stanford.edu/~seander/bithacks.html#CountBitsSetParallel
+/**
+ * @brief 计算两个BRIFF描述符的距离
+ * 
+ * @param a[in] 描述符a
+ * @param b[in] 描述符b
+ * @return int 描述符之间的距离
+ */
 int ORBmatcher::DescriptorDistance(const cv::Mat &a, const cv::Mat &b)
 {
     const int *pa = a.ptr<int32_t>();
@@ -1665,6 +1672,7 @@ int ORBmatcher::DescriptorDistance(const cv::Mat &a, const cv::Mat &b)
 
     for(int i=0; i<8; i++, pa++, pb++)
     {
+        /* 两个描述符进行异或运算，相同为0，不同为1 */
         unsigned  int v = *pa ^ *pb;
         v = v - ((v >> 1) & 0x55555555);
         v = (v & 0x33333333) + ((v >> 2) & 0x33333333);

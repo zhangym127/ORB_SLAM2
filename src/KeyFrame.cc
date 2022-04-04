@@ -120,6 +120,12 @@ cv::Mat KeyFrame::GetTranslation()
     return Tcw.rowRange(0,3).col(3).clone();
 }
 
+/**
+ * @brief 在关键帧和当前帧之间添加一条边（连接）
+ * 
+ * @param pKF 关键帧
+ * @param weight 权重，即两帧之间拥有的共视3D点个数
+ */
 void KeyFrame::AddConnection(KeyFrame *pKF, const int &weight)
 {
     {
@@ -207,6 +213,12 @@ int KeyFrame::GetWeight(KeyFrame *pKF)
         return 0;
 }
 
+/**
+ * @brief 添加Map点到关键帧
+ * 
+ * @param pMP Map点
+ * @param idx Map点对应的特征点序号
+ */
 void KeyFrame::AddMapPoint(MapPoint *pMP, const size_t &idx)
 {
     unique_lock<mutex> lock(mMutexFeatures);
@@ -286,17 +298,28 @@ MapPoint* KeyFrame::GetMapPoint(const size_t &idx)
     return mvpMapPoints[idx];
 }
 
+/**
+ * @brief 更新关键帧之间的连接
+ * 
+ * 1. 统计与当前帧具有共视关系的关键帧以及拥有的共视点个数，所谓共视关系是指能够同时看到某个Map点
+ * 2. 对于共视个数超出阈值的关键帧，在该帧和当前帧之间添加一条边，边的权重是共视点的个数
+ * 3. 如果没有哪个帧的共视个数超出阈值，则在拥有最大共视的帧和当前帧之间添加一条边
+ * 4. 将拥有共视的关键帧及共视个数排序，记录在当前帧中，以便将来使用
+ * 5. 根据权重的大小建立树形结构，选择权重最高的关键帧作为当前帧的父节点
+ */
 void KeyFrame::UpdateConnections()
 {
+    /* <关键帧-权重>，权重为其它关键帧与当前关键帧共视3d点的个数 */
     map<KeyFrame*,int> KFcounter;
 
+    /* 取出当前关键帧下所有的Map点 */
     vector<MapPoint*> vpMP;
-
     {
         unique_lock<mutex> lockMPs(mMutexFeatures);
         vpMP = mvpMapPoints;
     }
 
+    /* 遍历所有的Map点 */
     //For all map points in keyframe check in which other keyframes are they seen
     //Increase counter for those keyframes
     for(vector<MapPoint*>::iterator vit=vpMP.begin(), vend=vpMP.end(); vit!=vend; vit++)
@@ -309,10 +332,12 @@ void KeyFrame::UpdateConnections()
         if(pMP->isBad())
             continue;
 
+        /* 取出当前Map点的所有观察 */
         map<KeyFrame*,size_t> observations = pMP->GetObservations();
-
+        /* 遍历每个观察中的关键帧 */
         for(map<KeyFrame*,size_t>::iterator mit=observations.begin(), mend=observations.end(); mit!=mend; mit++)
         {
+            /* 如果是当前帧则跳过，否则对应的权重加一 */
             if(mit->first->mnId==mnId)
                 continue;
             KFcounter[mit->first]++;
@@ -329,15 +354,18 @@ void KeyFrame::UpdateConnections()
     KeyFrame* pKFmax=NULL;
     int th = 15;
 
+    /* 遍历权重KFcounter，first是关键帧，second是该帧与当前帧共视的3D点个数 */
     vector<pair<int,KeyFrame*> > vPairs;
     vPairs.reserve(KFcounter.size());
     for(map<KeyFrame*,int>::iterator mit=KFcounter.begin(), mend=KFcounter.end(); mit!=mend; mit++)
     {
+        /* 记录具有与当前帧最大共视个数的关键帧及共视个数 */
         if(mit->second>nmax)
         {
             nmax=mit->second;
             pKFmax=mit->first;
         }
+        /* 如果共视个数大于阈值，则将该帧及共视个数添加到vPairs，与当前帧建立连接 */
         if(mit->second>=th)
         {
             vPairs.push_back(make_pair(mit->second,mit->first));
@@ -345,12 +373,14 @@ void KeyFrame::UpdateConnections()
         }
     }
 
+    /* 如果没有那个关键帧的共视个数达到阈值，则取拥有最大共视个数的帧，与当前帧建立连接 */
     if(vPairs.empty())
     {
         vPairs.push_back(make_pair(nmax,pKFmax));
         pKFmax->AddConnection(this,nmax);
     }
 
+    /* 对共视达到阈值的关键帧排序，由大到小 */
     sort(vPairs.begin(),vPairs.end());
     list<KeyFrame*> lKFs;
     list<int> lWs;
@@ -364,14 +394,18 @@ void KeyFrame::UpdateConnections()
         unique_lock<mutex> lockCon(mMutexConnections);
 
         // mspConnectedKeyFrames = spConnectedKeyFrames;
+        /* 更新当前帧的关键帧连接权重 */
         mConnectedKeyFrameWeights = KFcounter;
+        /* 按照从大到小的顺序记录具有共视关系的关键帧及共视个数 */
         mvpOrderedConnectedKeyFrames = vector<KeyFrame*>(lKFs.begin(),lKFs.end());
         mvOrderedWeights = vector<int>(lWs.begin(), lWs.end());
 
+        /* 在关键帧之间建立树形结构，父子关系源于共视程度的高低 */
         if(mbFirstConnection && mnId!=0)
         {
+            /* 初始化当前帧的父帧为共视程度最高的那个关键帧 */
             mpParent = mvpOrderedConnectedKeyFrames.front();
-            mpParent->AddChild(this);
+            mpParent->AddChild(this); //建立双向连接
             mbFirstConnection = false;
         }
 

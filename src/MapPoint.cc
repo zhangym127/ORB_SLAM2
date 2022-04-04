@@ -95,6 +95,14 @@ KeyFrame* MapPoint::GetReferenceKeyFrame()
     return mpRefKF;
 }
 
+/**
+ * @brief 建立从Map点到关键帧的映射
+ * 
+ * 每个Map点可以被多个图像帧观测到，记录所有观测到该点的关键帧及其特征点序号
+ * 
+ * @param pKF 关键帧
+ * @param idx Map点在该帧特征点中序号
+ */
 void MapPoint::AddObservation(KeyFrame* pKF, size_t idx)
 {
     unique_lock<mutex> lock(mMutexFeatures);
@@ -239,13 +247,19 @@ float MapPoint::GetFoundRatio()
     return static_cast<float>(mnFound)/mnVisible;
 }
 
+/**
+ * @brief 计算独特描述符
+ * 
+ * 由于一个Map点会被许多图像帧观测到，因此为每个图像帧建立了一个观察observation，观察中存放关键帧以及特征点序号。
+ * 在插入了新的图像帧之后，需要判断是否更新当前点的独特描述符mDescriptor。
+ */
 void MapPoint::ComputeDistinctiveDescriptors()
 {
     // Retrieve all observed descriptors
     vector<cv::Mat> vDescriptors;
 
+    /* 取得Map点的所有观察observations */
     map<KeyFrame*,size_t> observations;
-
     {
         unique_lock<mutex> lock1(mMutexFeatures);
         if(mbBad)
@@ -258,6 +272,7 @@ void MapPoint::ComputeDistinctiveDescriptors()
 
     vDescriptors.reserve(observations.size());
 
+    /* 遍历Map点的每一个观察，每个观察的first是关键帧，second是特征点序号，取得该特征点的BRIFF描述符，添加到vDescriptors中 */
     for(map<KeyFrame*,size_t>::iterator mit=observations.begin(), mend=observations.end(); mit!=mend; mit++)
     {
         KeyFrame* pKF = mit->first;
@@ -269,6 +284,7 @@ void MapPoint::ComputeDistinctiveDescriptors()
     if(vDescriptors.empty())
         return;
 
+    /* 计算vDescriptors中两两描述符之间的距离 */
     // Compute distances between them
     const size_t N = vDescriptors.size();
 
@@ -284,6 +300,7 @@ void MapPoint::ComputeDistinctiveDescriptors()
         }
     }
 
+    /* 找出到其他描述符距离最小的那个描述符 */
     // Take the descriptor with least median distance to the rest
     int BestMedian = INT_MAX;
     int BestIdx = 0;
@@ -300,6 +317,7 @@ void MapPoint::ComputeDistinctiveDescriptors()
         }
     }
 
+    /* 更换独特描述符 */
     {
         unique_lock<mutex> lock(mMutexFeatures);
         mDescriptor = vDescriptors[BestIdx].clone();
