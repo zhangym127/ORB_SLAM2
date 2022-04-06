@@ -614,11 +614,12 @@ void Tracking::StereoInitialization()
 }
 
 /**
- * @brief 单目跟踪初始化
+ * @brief 单目跟踪初始化，初始帧和参考帧获得位姿，建立Map，开始优化
  * 
- * 1.基于当前帧和参考帧之间的匹配特征点
- * 2.找出当前帧的位置和姿态
- * 3.创建初始的单目地图
+ * 1.找出当前帧和参考帧之间的匹配特征点
+ * 2.基于匹配特征点找出当前帧相对于参考帧的位姿R和t，还原出3D空间点
+ * 3.将位姿R和t添加到参考帧和当前帧
+ * 4.创建初始的单目地图
  */
 void Tracking::MonocularInitialization()
 {
@@ -696,6 +697,8 @@ void Tracking::MonocularInitialization()
                 }
             }
 
+            /* 将位姿R和t添加到到当前帧和初始帧中 */
+
             // Set Frame Poses
             /* 设置初始帧的位姿：单位矩阵 */
             mInitialFrame.SetPose(cv::Mat::eye(4,4,CV_32F));
@@ -714,8 +717,19 @@ void Tracking::MonocularInitialization()
 /**
  * @brief 创建初始的单目地图
  * 
- * 
- * 4.将mState设置成OK，表征初始化完成
+ * 1.分别为初始帧和当前帧创建关键帧，关键帧的一个主要特征是相互之间有连接（边），有权重描述
+ * 2.创建关键帧的词袋
+ * 3.将关键帧插入到Map中
+ * 4.将与两帧对应的3D空间点添加到Map
+ *  a.将3D空间点添加到关键帧，建立从关键帧到Map点的映射
+ *  b.将关键帧添加到3D空间点的观察中，建立从Map点到关键帧的映射
+ *  c.更新3D空间点的独特描述符
+ *  d.更新Map点的平均观测方向以及观测距离范围
+ * 5.更新关键帧之间的连接关系、权重，并根据权重建立树形结构
+ * 6.进行BA优化，更新关键帧的位姿，更新3D空间点的坐标
+ * 7.单目传感器无法恢复真实的深度，将关键帧位姿和3D空间点坐标归一化
+ * 8.更新LocalMapper等变量
+ * 9.将mState设置成OK，表征初始化完成
  */
 void Tracking::CreateInitialMapMonocular()
 {
@@ -744,6 +758,7 @@ void Tracking::CreateInitialMapMonocular()
         //Create MapPoint.
         cv::Mat worldPos(mvIniP3D[i]);
 
+        /* 用3D空间点的坐标、关键帧、Map初始化Map点 */
         MapPoint* pMP = new MapPoint(worldPos,pKFcur,mpMap);
 
         /* 建立从关键帧到Map点的映射关系 */
@@ -756,6 +771,7 @@ void Tracking::CreateInitialMapMonocular()
 
         /* 更新独特描述符 */
         pMP->ComputeDistinctiveDescriptors();
+        /* 更新Map点的平均观测方向以及观测距离范围 */
         pMP->UpdateNormalAndDepth();
 
         /* 填写当前帧的Map点以及离点结构 */
@@ -779,8 +795,11 @@ void Tracking::CreateInitialMapMonocular()
     // Bundle Adjustment
     cout << "New Map created with " << mpMap->MapPointsInMap() << " points" << endl;
 
+    /* BA优化，迭代20次。BA优化只和关键帧的位姿（顶点）、Map点的坐标（顶点）以及从
+     * Map点到关键帧的投影即特征点（边）相关，与上面创建的关键帧之间的连接没有关系 */
     Optimizer::GlobalBundleAdjustemnt(mpMap,20);
 
+    /* 取得初始帧的场景深度中值，参数2表示取中值深度 */
     // Set median depth to 1
     float medianDepth = pKFini->ComputeSceneMedianDepth(2);
     float invMedianDepth = 1.0f/medianDepth;
@@ -792,11 +811,15 @@ void Tracking::CreateInitialMapMonocular()
         return;
     }
 
+    /* 单目传感器无法恢复真实的深度，这里将关键帧位姿和点云坐标归一化到1 */
+
+    /* 用中值深度对当前帧的平移向量进行归一化 */
     // Scale initial baseline
     cv::Mat Tc2w = pKFcur->GetPose();
     Tc2w.col(3).rowRange(0,3) = Tc2w.col(3).rowRange(0,3)*invMedianDepth;
     pKFcur->SetPose(Tc2w);
 
+    /* 用中值深度对所有的Map点坐标进行归一化 */
     // Scale points
     vector<MapPoint*> vpAllMapPoints = pKFini->GetMapPointMatches();
     for(size_t iMP=0; iMP<vpAllMapPoints.size(); iMP++)
@@ -808,6 +831,7 @@ void Tracking::CreateInitialMapMonocular()
         }
     }
 
+    /* 更新若干变量 */
     mpLocalMapper->InsertKeyFrame(pKFini);
     mpLocalMapper->InsertKeyFrame(pKFcur);
 
@@ -829,9 +853,14 @@ void Tracking::CreateInitialMapMonocular()
 
     mpMap->mvpKeyFrameOrigins.push_back(pKFini);
 
+    /* 初始化完成，将状态设置为OK */
     mState=OK;
 }
 
+/**
+ * @brief 
+ * 
+ */
 void Tracking::CheckReplacedInLastFrame()
 {
     for(int i =0; i<mLastFrame.N; i++)

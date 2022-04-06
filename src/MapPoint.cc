@@ -345,6 +345,13 @@ bool MapPoint::IsInKeyFrame(KeyFrame *pKF)
     return (mObservations.count(pKF));
 }
 
+/**
+ * @brief 更新Map点的平均观测方向以及观测距离范围
+ * 
+ * mNormalVector：3D点被观测的平均方向
+ * mfMaxDistance：观测到该3D点的最大距离
+ * mfMinDistance：观测到该3D点的最小距离
+ */
 void MapPoint::UpdateNormalAndDepth()
 {
     map<KeyFrame*,size_t> observations;
@@ -363,28 +370,29 @@ void MapPoint::UpdateNormalAndDepth()
     if(observations.empty())
         return;
 
+    /* 遍历Map点的所有的观察 */
     cv::Mat normal = cv::Mat::zeros(3,1,CV_32F);
     int n=0;
     for(map<KeyFrame*,size_t>::iterator mit=observations.begin(), mend=observations.end(); mit!=mend; mit++)
     {
         KeyFrame* pKF = mit->first;
-        cv::Mat Owi = pKF->GetCameraCenter();
-        cv::Mat normali = mWorldPos - Owi;
-        normal = normal + normali/cv::norm(normali);
+        cv::Mat Owi = pKF->GetCameraCenter(); //取得观察帧的相机光心坐标
+        cv::Mat normali = mWorldPos - Owi; //取得观察帧的方向向量 
+        normal = normal + normali/cv::norm(normali); //对观测向量进行归一化并累加起来
         n++;
     }
 
-    cv::Mat PC = Pos - pRefKF->GetCameraCenter();
-    const float dist = cv::norm(PC);
-    const int level = pRefKF->mvKeysUn[observations[pRefKF]].octave;
-    const float levelScaleFactor =  pRefKF->mvScaleFactors[level];
-    const int nLevels = pRefKF->mnScaleLevels;
+    cv::Mat PC = Pos - pRefKF->GetCameraCenter(); //取得参考帧的方向向量
+    const float dist = cv::norm(PC); //获得参考帧的观测距离
+    const int level = pRefKF->mvKeysUn[observations[pRefKF]].octave; //取得对应特征点所在的图像金字塔层
+    const float levelScaleFactor =  pRefKF->mvScaleFactors[level]; //取得该图像金字塔层的缩放比例
+    const int nLevels = pRefKF->mnScaleLevels; //金字塔层数
 
     {
         unique_lock<mutex> lock3(mMutexPos);
-        mfMaxDistance = dist*levelScaleFactor;
-        mfMinDistance = mfMaxDistance/pRefKF->mvScaleFactors[nLevels-1];
-        mNormalVector = normal/n;
+        mfMaxDistance = dist*levelScaleFactor;                              //观测到该点的距离最大值
+        mfMinDistance = mfMaxDistance/pRefKF->mvScaleFactors[nLevels-1];    //观测到该点的距离最小值
+        mNormalVector = normal/n;                                           //获得平均观测方向
     }
 }
 

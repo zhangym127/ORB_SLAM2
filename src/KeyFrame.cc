@@ -664,9 +664,19 @@ cv::Mat KeyFrame::UnprojectStereo(int i)
         return cv::Mat();
 }
 
+/**
+ * @brief 计算关键帧的场景深度，q=2表示是中值深度
+ *  
+ *  记录所有Map点的深度，返回中值
+ * 
+ * @param q 
+ * @return float 
+ */
 float KeyFrame::ComputeSceneMedianDepth(const int q)
 {
     vector<MapPoint*> vpMapPoints;
+
+    /* 取得关键帧的位姿 */
     cv::Mat Tcw_;
     {
         unique_lock<mutex> lock(mMutexFeatures);
@@ -677,13 +687,17 @@ float KeyFrame::ComputeSceneMedianDepth(const int q)
 
     vector<float> vDepths;
     vDepths.reserve(N);
+    /* 取得关键帧位姿的最后一行，并求转置 */
     cv::Mat Rcw2 = Tcw_.row(2).colRange(0,3);
     Rcw2 = Rcw2.t();
+    /* 取得关键帧位姿的z轴平移量 */
     float zcw = Tcw_.at<float>(2,3);
+    /* 遍历所有的Map点，求得所有Map点的深度，添加到vDepths */
     for(int i=0; i<N; i++)
     {
         if(mvpMapPoints[i])
         {
+            /* 将Map点坐标转换到相机坐标系，由于只需要深度信息，因此只需要旋转矩阵的最后一行以及位移向量的最后一个 */
             MapPoint* pMP = mvpMapPoints[i];
             cv::Mat x3Dw = pMP->GetWorldPos();
             float z = Rcw2.dot(x3Dw)+zcw;
@@ -691,8 +705,10 @@ float KeyFrame::ComputeSceneMedianDepth(const int q)
         }
     }
 
+    /* 对所有的Map点深度进行排序 */
     sort(vDepths.begin(),vDepths.end());
 
+    /* 如果q等于2，则取得深度的中值返回 */
     return vDepths[(vDepths.size()-1)/q];
 }
 
