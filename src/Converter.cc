@@ -24,6 +24,12 @@
 namespace ORB_SLAM2
 {
 
+/**
+ * @brief 将一帧图像对应的描述符矩阵转成分离的由vector容器承载的描述符
+ * 
+ * @param Descriptors BRIEF描述符
+ * @return std::vector<cv::Mat> BRIEF描述符向量
+ */
 std::vector<cv::Mat> Converter::toDescriptorVector(const cv::Mat &Descriptors)
 {
     std::vector<cv::Mat> vDesc;

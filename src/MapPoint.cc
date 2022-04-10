@@ -396,12 +396,22 @@ void MapPoint::UpdateNormalAndDepth()
     }
 }
 
+/**
+ * @brief 返回观测到该Map点的距离最小值的80%
+ * 
+ * @return float 观测到该Map点的距离最小值的80%
+ */
 float MapPoint::GetMinDistanceInvariance()
 {
     unique_lock<mutex> lock(mMutexPos);
     return 0.8f*mfMinDistance;
 }
 
+/**
+ * @brief 返回观测到该Map点的距离最大值的120%
+ * 
+ * @return float 测到该Map点的距离最大值的120%
+ */
 float MapPoint::GetMaxDistanceInvariance()
 {
     unique_lock<mutex> lock(mMutexPos);

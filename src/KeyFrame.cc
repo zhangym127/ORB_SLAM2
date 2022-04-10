@@ -177,6 +177,12 @@ vector<KeyFrame*> KeyFrame::GetVectorCovisibleKeyFrames()
     return mvpOrderedConnectedKeyFrames;
 }
 
+/**
+ * @brief 获得与该关键帧有连接的前N个关键帧，如果有连接的关键帧数量＜N则返回全部。
+ * 
+ * @param N[in] 前N个
+ * @return vector<KeyFrame*> 有连接的前N个关键帧
+ */
 vector<KeyFrame*> KeyFrame::GetBestCovisibilityKeyFrames(const int &N)
 {
     unique_lock<mutex> lock(mMutexConnections);
@@ -286,6 +292,11 @@ int KeyFrame::TrackedMapPoints(const int &minObs)
     return nPoints;
 }
 
+/**
+ * @brief 取得关键帧下所有的Map点
+ * 
+ * @return vector<MapPoint*> 返回关键帧下所有的Map点
+ */
 vector<MapPoint*> KeyFrame::GetMapPointMatches()
 {
     unique_lock<mutex> lock(mMutexFeatures);

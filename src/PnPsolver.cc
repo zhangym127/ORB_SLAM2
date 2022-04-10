@@ -162,6 +162,15 @@ cv::Mat PnPsolver::find(vector<bool> &vbInliers, int &nInliers)
     return iterate(mRansacMaxIts,bFlag,vbInliers,nInliers);    
 }
 
+/**
+ * @brief FIXME:
+ * 
+ * @param nIterations 
+ * @param bNoMore 
+ * @param vbInliers 
+ * @param nInliers 
+ * @return cv::Mat 
+ */
 cv::Mat PnPsolver::iterate(int nIterations, bool &bNoMore, vector<bool> &vbInliers, int &nInliers)
 {
     bNoMore = false;

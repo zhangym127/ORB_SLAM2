@@ -156,6 +156,16 @@ bool ORBmatcher::CheckDistEpipolarLine(const cv::KeyPoint &kp1,const cv::KeyPoin
     return dsqr<3.84*pKF2->mvLevelSigma2[kp2.octave];
 }
 
+/**
+ * @brief 在当前帧和参考关键帧之间寻找匹配的特征点
+ * 
+ * FIXME: 具体的寻找方法有待进一步分析
+ * 
+ * @param pKF[in] 参考关键帧
+ * @param F[in] 当前帧
+ * @param vpMapPointMatches[out] 匹配的特征点
+ * @return int 匹配的特征点数量
+ */
 int ORBmatcher::SearchByBoW(KeyFrame* pKF,Frame &F, vector<MapPoint*> &vpMapPointMatches)
 {
     const vector<MapPoint*> vpMapPointsKF = pKF->GetMapPointMatches();
@@ -404,6 +414,7 @@ int ORBmatcher::SearchByProjection(KeyFrame* pKF, cv::Mat Scw, const vector<MapP
 
 /**
  * @brief 在第1帧和第2帧之间寻找匹配的特征点
+ * 
  * FIXME: 特征点的匹配方法有待进一步分析
  * 
  * @param F1 第1帧
@@ -1337,6 +1348,22 @@ int ORBmatcher::SearchBySim3(KeyFrame *pKF1, KeyFrame *pKF2, vector<MapPoint*> &
     return nFound;
 }
 
+/**
+ * @brief 搜索当前帧与上一帧匹配的Map点并添加到当前帧
+ * 
+ * 1. 对于双目或RGBD，判断当前帧是前进还是后退，主要目的是缩小图像金字塔的搜索范围
+ * 2. 将上一帧的Map点投射到当前帧，获得对应特征点坐标的估计值
+ * 3. 以该坐标为中心，取得当前帧中搜索半径和图像金字塔层级范围内的特征点
+ * 4. 遍历这些点，找到与上一帧Map点的BRIEF描述符距离最近的点及其距离
+ * 5. 如果描述符距离满足阈值，则将该Map点添加到当前帧
+ * 6. 进行旋转一致性检查，如果不一致，则将Map点从当前帧中删除
+ * 
+ * @param CurrentFrame[in] 当前帧
+ * @param LastFrame[in] 上一帧
+ * @param th[in] 确定搜索半径的阈值，单位是像素
+ * @param bMono[in] 是否是单目
+ * @return int 返回匹配的特征点数量
+ */
 int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, const float th, const bool bMono)
 {
     int nmatches = 0;
@@ -1347,27 +1374,34 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, 
         rotHist[i].reserve(500);
     const float factor = 1.0f/HISTO_LENGTH;
 
+    /* 从世界坐标系到当前帧相机坐标系的变换 */
     const cv::Mat Rcw = CurrentFrame.mTcw.rowRange(0,3).colRange(0,3);
     const cv::Mat tcw = CurrentFrame.mTcw.rowRange(0,3).col(3);
 
+    /* 当前帧相机坐标系的坐标原点在世界坐标系下的坐标 */
     const cv::Mat twc = -Rcw.t()*tcw;
 
+    /* 从世界坐标系到上一帧相机坐标系的变换 */
     const cv::Mat Rlw = LastFrame.mTcw.rowRange(0,3).colRange(0,3);
     const cv::Mat tlw = LastFrame.mTcw.rowRange(0,3).col(3);
 
+    /* 当前帧相机坐标系的坐标原点在上一帧坐标系下的坐标 */
     const cv::Mat tlc = Rlw*twc+tlw;
 
+    /* 对于双目或者RGBD，判断当前帧是前进还是后退 */
     const bool bForward = tlc.at<float>(2)>CurrentFrame.mb && !bMono;
     const bool bBackward = -tlc.at<float>(2)>CurrentFrame.mb && !bMono;
 
     for(int i=0; i<LastFrame.N; i++)
     {
+        /* 取上一帧的Map点 */
         MapPoint* pMP = LastFrame.mvpMapPoints[i];
 
         if(pMP)
         {
             if(!LastFrame.mvbOutlier[i])
             {
+                /* 将上一帧的Map点投射到当前帧的坐标系下x3Dc */
                 // Project
                 cv::Mat x3Dw = pMP->GetWorldPos();
                 cv::Mat x3Dc = Rcw*x3Dw+tcw;
@@ -1379,9 +1413,11 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, 
                 if(invzc<0)
                     continue;
 
+                /* 完成从3d-2d的投影，获得Map点对应的图像坐标(u,v) */
                 float u = CurrentFrame.fx*xc*invzc+CurrentFrame.cx;
                 float v = CurrentFrame.fy*yc*invzc+CurrentFrame.cy;
 
+                /* 检查图像坐标是否超出当前帧的图像边界 */
                 if(u<CurrentFrame.mnMinX || u>CurrentFrame.mnMaxX)
                     continue;
                 if(v<CurrentFrame.mnMinY || v>CurrentFrame.mnMaxY)
@@ -1389,45 +1425,58 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, 
 
                 int nLastOctave = LastFrame.mvKeys[i].octave;
 
+                /* 根据特征点所在的图像金字塔层级确定搜索半径 */
                 // Search in a window. Size depends on scale
                 float radius = th*CurrentFrame.mvScaleFactors[nLastOctave];
 
                 vector<size_t> vIndices2;
 
+                /* 找到当前帧中(u,v)附近的特征点 */
                 if(bForward)
+                    /* 前进时，距离变近，上一帧的特征点在当前帧需要更高的金字塔层级才能检测出来 */
                     vIndices2 = CurrentFrame.GetFeaturesInArea(u,v, radius, nLastOctave);
                 else if(bBackward)
+                    /* 后退时，距离变远，上一帧的特征点在当前帧需要更低的金字塔层级才能检测出来 */
                     vIndices2 = CurrentFrame.GetFeaturesInArea(u,v, radius, 0, nLastOctave);
                 else
+                    /* 对于单目无法判断深度，也就无法判断前进还是后退，只能扩大搜索范围 */
                     vIndices2 = CurrentFrame.GetFeaturesInArea(u,v, radius, nLastOctave-1, nLastOctave+1);
 
                 if(vIndices2.empty())
                     continue;
 
+                /* 取得上一帧Map点的描述符 */
                 const cv::Mat dMP = pMP->GetDescriptor();
 
                 int bestDist = 256;
                 int bestIdx2 = -1;
 
+                /* 遍历当前帧中找到的特征点，找到与上一帧Map点最匹配的特征点 */
                 for(vector<size_t>::const_iterator vit=vIndices2.begin(), vend=vIndices2.end(); vit!=vend; vit++)
                 {
+                    /* 如果该特征点已经有对应的Map点及其观测，则跳过 */
                     const size_t i2 = *vit;
                     if(CurrentFrame.mvpMapPoints[i2])
                         if(CurrentFrame.mvpMapPoints[i2]->Observations()>0)
                             continue;
 
+                    /* 双目或RGBD时，需要确保右图的对应点也在搜索半径内 */
                     if(CurrentFrame.mvuRight[i2]>0)
                     {
+                        /* 求右侧对应点的x坐标 */
                         const float ur = u - CurrentFrame.mbf*invzc;
                         const float er = fabs(ur - CurrentFrame.mvuRight[i2]);
                         if(er>radius)
                             continue;
                     }
 
+                    /* 取得该特征点对应的描述符 */
                     const cv::Mat &d = CurrentFrame.mDescriptors.row(i2);
 
+                    /* 计算两个描述符的距离 */
                     const int dist = DescriptorDistance(dMP,d);
 
+                    /* 更新最优匹配结果 */
                     if(dist<bestDist)
                     {
                         bestDist=dist;
@@ -1437,9 +1486,11 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, 
 
                 if(bestDist<=TH_HIGH)
                 {
+                    /* 添加该Map点到当前帧 */
                     CurrentFrame.mvpMapPoints[bestIdx2]=pMP;
                     nmatches++;
 
+                    /* 计算旋转一致性 */
                     if(mbCheckOrientation)
                     {
                         float rot = LastFrame.mvKeysUn[i].angle-CurrentFrame.mvKeysUn[bestIdx2].angle;
@@ -1456,6 +1507,7 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, 
         }
     }
 
+    /* 如果旋转一致性检查不通过，则将该Map点从当前帧中删除 */
     //Apply rotation consistency
     if(mbCheckOrientation)
     {
@@ -1481,10 +1533,28 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, 
     return nmatches;
 }
 
+/**
+ * @brief 搜索当前帧与关键帧匹配的Map点并添加到当前帧
+ * 
+ * 1. 取得关键帧的所有Map点
+ * 2. 将关键帧的Map点投射到当前帧，获得对应特征点坐标的估计值
+ * 3. 以该坐标为中心，取得当前帧中搜索半径和图像金字塔层级范围内的特征点
+ * 4. 遍历这些点，找到与关键帧Map点的BRIEF描述符距离最近的点及其距离
+ * 5. 如果描述符距离满足阈值，则将该Map点添加到当前帧
+ * 6. 进行旋转一致性检查，如果不一致，则将Map点从当前帧中删除
+ * 
+ * @param CurrentFrame[in] 当前帧
+ * @param pKF[in] 关键帧
+ * @param sAlreadyFound[in] 已知的共视Map点
+ * @param th[in] 确定搜索半径的阈值，单位是像素
+ * @param ORBdist[in] BRIEF描述符距离阈值 
+ * @return int 返回匹配的特征点数量
+ */
 int ORBmatcher::SearchByProjection(Frame &CurrentFrame, KeyFrame *pKF, const set<MapPoint*> &sAlreadyFound, const float th , const int ORBdist)
 {
     int nmatches = 0;
 
+    /* 计算当前帧相机坐标系的坐标原点在世界坐标系下的坐标Ow */
     const cv::Mat Rcw = CurrentFrame.mTcw.rowRange(0,3).colRange(0,3);
     const cv::Mat tcw = CurrentFrame.mTcw.rowRange(0,3).col(3);
     const cv::Mat Ow = -Rcw.t()*tcw;
@@ -1495,16 +1565,20 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, KeyFrame *pKF, const set
         rotHist[i].reserve(500);
     const float factor = 1.0f/HISTO_LENGTH;
 
+    /* 取得关键帧的所有Map点 */
     const vector<MapPoint*> vpMPs = pKF->GetMapPointMatches();
 
+    /* 遍历关键帧的每一个Map点 */
     for(size_t i=0, iend=vpMPs.size(); i<iend; i++)
     {
         MapPoint* pMP = vpMPs[i];
 
         if(pMP)
         {
+            /* 如果Map点是有效的，也不在已知的共视Map点中 */
             if(!pMP->isBad() && !sAlreadyFound.count(pMP))
             {
+                /* 将Map点投射到当前帧下x3Dc */
                 //Project
                 cv::Mat x3Dw = pMP->GetWorldPos();
                 cv::Mat x3Dc = Rcw*x3Dw+tcw;
@@ -1513,6 +1587,7 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, KeyFrame *pKF, const set
                 const float yc = x3Dc.at<float>(1);
                 const float invzc = 1.0/x3Dc.at<float>(2);
 
+                /* 完成从3d-2d的投影，获得Map点对应的图像坐标(u,v) */
                 const float u = CurrentFrame.fx*xc*invzc+CurrentFrame.cx;
                 const float v = CurrentFrame.fy*yc*invzc+CurrentFrame.cy;
 
@@ -1521,32 +1596,40 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, KeyFrame *pKF, const set
                 if(v<CurrentFrame.mnMinY || v>CurrentFrame.mnMaxY)
                     continue;
 
+                /* 计算从Ow到x3Dw的向量PO，即世界坐标系下，从当前帧相机坐标原点到Map点坐标的向量 */
                 // Compute predicted scale level
                 cv::Mat PO = x3Dw-Ow;
-                float dist3D = cv::norm(PO);
+                float dist3D = cv::norm(PO); //计算PO向量的长度，即Map点在当前帧相机坐标系下的深度
 
+                /* 取得观测到该Map点的最大和最小距离 */
                 const float maxDistance = pMP->GetMaxDistanceInvariance();
                 const float minDistance = pMP->GetMinDistanceInvariance();
 
+                /* Map点的深度必须在图像金字塔的范围内 */
                 // Depth must be inside the scale pyramid of the image
                 if(dist3D<minDistance || dist3D>maxDistance)
                     continue;
 
+                /* 根据Map点的深度估计所在的图像金字塔层 */
                 int nPredictedLevel = pMP->PredictScale(dist3D,&CurrentFrame);
 
+                /* 确定搜索半径，与所在的图像金字塔层相关 */
                 // Search in a window
                 const float radius = th*CurrentFrame.mvScaleFactors[nPredictedLevel];
 
+                /* 在指定的搜索半径内，找到当前帧中(u,v)附近的特征点 */
                 const vector<size_t> vIndices2 = CurrentFrame.GetFeaturesInArea(u, v, radius, nPredictedLevel-1, nPredictedLevel+1);
 
                 if(vIndices2.empty())
                     continue;
 
+                /* 获得关键帧Map点pMP的BRIEF描述符 */
                 const cv::Mat dMP = pMP->GetDescriptor();
 
                 int bestDist = 256;
                 int bestIdx2 = -1;
 
+                /* 遍历当前帧中找到的特征点，找到与关键帧Map点最匹配的特征点 */
                 for(vector<size_t>::const_iterator vit=vIndices2.begin(); vit!=vIndices2.end(); vit++)
                 {
                     const size_t i2 = *vit;
@@ -1566,9 +1649,11 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, KeyFrame *pKF, const set
 
                 if(bestDist<=ORBdist)
                 {
+                    /* 将匹配的Map点添加到当前帧 */
                     CurrentFrame.mvpMapPoints[bestIdx2]=pMP;
                     nmatches++;
 
+                    /* 计算旋转一致性 */
                     if(mbCheckOrientation)
                     {
                         float rot = pKF->mvKeysUn[i].angle-CurrentFrame.mvKeysUn[bestIdx2].angle;
@@ -1586,6 +1671,7 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, KeyFrame *pKF, const set
         }
     }
 
+    /* 如果旋转一致性检查不通过，则将该Map点从当前帧中删除 */
     if(mbCheckOrientation)
     {
         int ind1=-1;

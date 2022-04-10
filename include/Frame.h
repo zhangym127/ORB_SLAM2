@@ -162,8 +162,9 @@ public:
     static float mfGridElementHeightInv;
     std::vector<std::size_t> mGrid[FRAME_GRID_COLS][FRAME_GRID_ROWS];
 
+    
     // Camera pose.
-    cv::Mat mTcw;
+    cv::Mat mTcw;  // 世界坐标系到相机坐标系的位姿变换
 
     // Current and Next Frame id.
     static long unsigned int nNextId;

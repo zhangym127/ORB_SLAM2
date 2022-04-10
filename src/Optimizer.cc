@@ -286,8 +286,26 @@ void Optimizer::BundleAdjustment(const vector<KeyFrame *> &vpKFs, const vector<M
 
 }
 
+/**
+ * @brief 位姿优化
+ * 
+ * 1. 初始化g2o优化器
+ * 2. 将当前帧的位姿作为顶点添加到优化器，并且只有这一个顶点
+ * 3. 将当前帧的所有Map点以3D到2D投射的方式，作为边添加到优化器
+ * 4. 对当前帧的位姿进行优化
+ * 5. 根据优化后的结果逐一对所有的Map点进行重投影，划分成内点和离点
+ * 6. 用优化的结果更新当前帧的位姿
+ * 7. 返回Map点中内点的总数
+ * 
+ * 3D-2D 最小化重投影误差 e = (u,v) - project(Tcw*Pw)
+ * 只优化Frame的Tcw，不优化MapPoints的坐标
+ * 
+ * @param pFrame[in] 当前帧
+ * @return int 返回内点的数量
+ */
 int Optimizer::PoseOptimization(Frame *pFrame)
 {
+    /* 第一步：初始化g2o优化器 */
     g2o::SparseOptimizer optimizer;
     g2o::BlockSolver_6_3::LinearSolverType * linearSolver;
 
@@ -300,13 +318,15 @@ int Optimizer::PoseOptimization(Frame *pFrame)
 
     int nInitialCorrespondences=0;
 
+    /* 第二步：将当前帧的位姿作为顶点添加到优化器 */
     // Set Frame vertex
     g2o::VertexSE3Expmap * vSE3 = new g2o::VertexSE3Expmap();
-    vSE3->setEstimate(Converter::toSE3Quat(pFrame->mTcw));
+    vSE3->setEstimate(Converter::toSE3Quat(pFrame->mTcw)); //添加为估计值表示待优化
     vSE3->setId(0);
     vSE3->setFixed(false);
     optimizer.addVertex(vSE3);
 
+    /* 第三步：将从3D点到2D点的投影作为边添加到优化器 */
     // Set MapPoint vertices
     const int N = pFrame->N;
 
@@ -332,7 +352,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
         MapPoint* pMP = pFrame->mvpMapPoints[i];
         if(pMP)
         {
-            // Monocular observation
+            // Monocular observation 单目
             if(pFrame->mvuRight[i]<0)
             {
                 nInitialCorrespondences++;
@@ -344,30 +364,39 @@ int Optimizer::PoseOptimization(Frame *pFrame)
 
                 g2o::EdgeSE3ProjectXYZOnlyPose* e = new g2o::EdgeSE3ProjectXYZOnlyPose();
 
+                /* 边的一端是已经添加到优化器的顶点：当前帧的位姿 */
                 e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(0)));
+                /* 边的测量值就是特征点的坐标 */
                 e->setMeasurement(obs);
+
+                /* 设置噪声即信息矩阵 */
                 const float invSigma2 = pFrame->mvInvLevelSigma2[kpUn.octave];
                 e->setInformation(Eigen::Matrix2d::Identity()*invSigma2);
 
+                /* 设置鲁棒核函数 */
                 g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
                 e->setRobustKernel(rk);
                 rk->setDelta(deltaMono);
 
+                /* 设置投影所需的内参矩阵 */
                 e->fx = pFrame->fx;
                 e->fy = pFrame->fy;
                 e->cx = pFrame->cx;
                 e->cy = pFrame->cy;
+
+                /* 设置与观测值对应的空间点坐标 */
                 cv::Mat Xw = pMP->GetWorldPos();
                 e->Xw[0] = Xw.at<float>(0);
                 e->Xw[1] = Xw.at<float>(1);
                 e->Xw[2] = Xw.at<float>(2);
 
+                /* 添加边到优化器 */
                 optimizer.addEdge(e);
 
                 vpEdgesMono.push_back(e);
                 vnIndexEdgeMono.push_back(i);
             }
-            else  // Stereo observation
+            else  // Stereo observation 双目
             {
                 nInitialCorrespondences++;
                 pFrame->mvbOutlier[i] = false;
@@ -414,8 +443,10 @@ int Optimizer::PoseOptimization(Frame *pFrame)
     if(nInitialCorrespondences<3)
         return 0;
 
+    /* 第四步：开始优化。总共进行四次优化，每次优化后将观测分为内点和离点，离点不参与下次优化，但是在最后离点可以重新被归为内点。 */
     // We perform 4 optimizations, after each optimization we classify observation as inlier/outlier
     // At the next optimization, outliers are not included, but at the end they can be classified as inliers again.
+    /* 基于卡方检验计算出的阈值（假设测量有一个像素的偏差）*/
     const float chi2Mono[4]={5.991,5.991,5.991,5.991};
     const float chi2Stereo[4]={7.815,7.815,7.815, 7.815};
     const int its[4]={10,10,10,10};    
@@ -428,6 +459,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
         optimizer.initializeOptimization(0);
         optimizer.optimize(its[it]);
 
+        /* 单目 */
         nBad=0;
         for(size_t i=0, iend=vpEdgesMono.size(); i<iend; i++)
         {
@@ -437,7 +469,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
 
             if(pFrame->mvbOutlier[idx])
             {
-                e->computeError();
+                e->computeError();              //计算重投影误差
             }
 
             const float chi2 = e->chi2();
@@ -445,19 +477,21 @@ int Optimizer::PoseOptimization(Frame *pFrame)
             if(chi2>chi2Mono[it])
             {                
                 pFrame->mvbOutlier[idx]=true;
-                e->setLevel(1);
+                e->setLevel(1);                 //设置为离点
                 nBad++;
             }
             else
             {
                 pFrame->mvbOutlier[idx]=false;
-                e->setLevel(0);
+                e->setLevel(0);                 //设置为内点
             }
 
+            /* 只有前两次优化才需要鲁棒核函数，后两次不需要 */
             if(it==2)
                 e->setRobustKernel(0);
         }
 
+        /* 双目 */
         for(size_t i=0, iend=vpEdgesStereo.size(); i<iend; i++)
         {
             g2o::EdgeStereoSE3ProjectXYZOnlyPose* e = vpEdgesStereo[i];
@@ -491,6 +525,7 @@ int Optimizer::PoseOptimization(Frame *pFrame)
             break;
     }    
 
+    /* 将优化后的位姿更新到当前帧，并返回内点的数量 */
     // Recover optimized pose and return number of inliers
     g2o::VertexSE3Expmap* vSE3_recov = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(0));
     g2o::SE3Quat SE3quat_recov = vSE3_recov->estimate();

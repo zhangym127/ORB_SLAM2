@@ -355,6 +355,19 @@ bool Frame::isInFrustum(MapPoint *pMP, float viewingCosLimit)
     return true;
 }
 
+/**
+ * @brief 返回指定范围内的特征点
+ * 
+ * 1. 特征点必须在给定的圆内；
+ * 2. 特征点必须在给定的图像金字塔层级内
+ * 
+ * @param x[in] 中心坐标之x
+ * @param y[in] 中心坐标值y
+ * @param r[in] 搜索半径
+ * @param minLevel[in] 图像金字塔的最低层级（包含）
+ * @param maxLevel[in] 图像金字塔的最高层级（包含）
+ * @return vector<size_t> 指定范围内的特征点
+ */
 vector<size_t> Frame::GetFeaturesInArea(const float &x, const float  &y, const float  &r, const int minLevel, const int maxLevel) const
 {
     vector<size_t> vIndices;
@@ -423,6 +436,10 @@ bool Frame::PosInGrid(const cv::KeyPoint &kp, int &posX, int &posY)
 }
 
 
+/**
+ * @brief 将当前帧的BRIEF描述符转成Bow词袋mBowVec和特征向量mFeatVec
+ * 
+ */
 void Frame::ComputeBoW()
 {
     if(mBowVec.empty())
