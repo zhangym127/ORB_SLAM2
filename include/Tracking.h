@@ -148,6 +148,10 @@ protected:
     // points in the map. Still tracking will continue if there are enough matches with temporal points.
     // In that case we are doing visual odometry. The system will try to do relocalization to recover
     // "zero-drift" localization to the map.
+    /* 在纯定位模式下，则当地图中的点不匹配时，此标志为真。
+     * 但是如果有足够的临时点匹配，仍将继续跟踪。
+     * 在这种情况下，我们进行视觉里程计VO。
+     * 系统将尝试重新定位，以恢复基于地图的定位。 */
     bool mbVO;
 
     //Other Thread Pointers

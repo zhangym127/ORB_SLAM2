@@ -297,33 +297,53 @@ void Frame::UpdatePoseMatrices()
     mOw = -mRcw.t()*mtcw;
 }
 
+/**
+ * @brief 确认Map点是否在当前帧的视野内，Frustum是圆锥的意思，引申为视野
+ * 
+ * 1. 将Map点从世界坐标系转到相机坐标系，确认深度为正值
+ * 2. 将Map点继续转为像素坐标系，确认点落在当前帧的图像上
+ * 3. 确认当前帧对该Map点的观测方向与该点的平均观测方向的夹角小于给定的阈值
+ * 4. 标记该点将参与当前帧特征点的ORB匹配，将当前帧的像素坐标、所在图像金字塔层级、以及
+ * 当前帧观测方向与平均观测方向的夹角填入Map点。
+ * 
+ * @param pMP[in] Map点
+ * @param viewingCosLimit[in] 
+ * @return true 在当前帧的视野内
+ * @return false 不在当前帧的视野内
+ */
 bool Frame::isInFrustum(MapPoint *pMP, float viewingCosLimit)
 {
     pMP->mbTrackInView = false;
 
+    /* 取得Map点在世界坐标系下的坐标P */
     // 3D in absolute coordinates
     cv::Mat P = pMP->GetWorldPos(); 
 
+    /* 将P点从世界坐标系转到当前帧的相机坐标系 */
     // 3D in camera coordinates
     const cv::Mat Pc = mRcw*P+mtcw;
     const float &PcX = Pc.at<float>(0);
     const float &PcY= Pc.at<float>(1);
     const float &PcZ = Pc.at<float>(2);
 
+    /* 确保深度为正值 */
     // Check positive depth
     if(PcZ<0.0f)
         return false;
 
+    /* 转为像素坐标 */
     // Project in image and check it is not outside
     const float invz = 1.0f/PcZ;
     const float u=fx*PcX*invz+cx;
     const float v=fy*PcY*invz+cy;
 
+    /* 确认像素坐标在当前帧的图像内 */
     if(u<mnMinX || u>mnMaxX)
         return false;
     if(v<mnMinY || v>mnMaxY)
         return false;
 
+    /* 检查P点到相机光心的距离在该Map点的正常观测范围内 */
     // Check distance is in the scale invariance region of the MapPoint
     const float maxDistance = pMP->GetMaxDistanceInvariance();
     const float minDistance = pMP->GetMinDistanceInvariance();
@@ -333,19 +353,26 @@ bool Frame::isInFrustum(MapPoint *pMP, float viewingCosLimit)
     if(dist<minDistance || dist>maxDistance)
         return false;
 
+    /* 获得该Map点的平均观察方向 */
    // Check viewing angle
     cv::Mat Pn = pMP->GetNormal();
 
+    /* 通过点乘法获得当前帧对该点的观测方向与该点的平均观测方向的夹角的余弦值 */
     const float viewCos = PO.dot(Pn)/dist;
 
+    /* 余弦值必须大于给定的阈值，即夹角必须小于给定的阈值 */
     if(viewCos<viewingCosLimit)
         return false;
 
+    /* 根据P点的距离估计所在的图像金字塔层级 */
     // Predict scale in the image
     const int nPredictedLevel = pMP->PredictScale(dist,this);
 
     // Data used by the tracking
+
+    /* 标记该点将要在SearchByProjection中参与当前帧特征点的ORB匹配 */
     pMP->mbTrackInView = true;
+    /* 记录投影后的像素坐标，用于SearchByProjection中以该点为中心搜索待匹配的特征点 */
     pMP->mTrackProjX = u;
     pMP->mTrackProjXR = u - mbf*invz;
     pMP->mTrackProjY = v;

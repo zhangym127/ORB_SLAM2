@@ -164,6 +164,14 @@ void FrameDrawer::DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText)
 
 }
 
+/**
+ * @brief 更新绘图器，将当前帧的Map点中的内点划分成mvbMap和mvbVO两类
+ * 
+ * 如果Map点的观测不为零，即至少一个关键帧能够观测到该点，则归类为mvbMap
+ * 如果Map点的观测为零，即没有任何一个关键帧能够观测到该点，则归类为mvbVO
+ * 
+ * @param pTracker 
+ */
 void FrameDrawer::Update(Tracking *pTracker)
 {
     unique_lock<mutex> lock(mMutex);

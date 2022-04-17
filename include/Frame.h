@@ -81,6 +81,7 @@ public:
 
     // Check if a MapPoint is in the frustum of the camera
     // and fill variables of the MapPoint to be used by the tracking
+    /* 确认Map点是否在当前帧的视野内，Frustum是圆锥的意思，引申为视野，并且填充Map点的若干变量以实现跟踪功能 */
     bool isInFrustum(MapPoint* pMP, float viewingCosLimit);
 
     // Compute the cell of a keypoint (return false if outside the grid)
@@ -208,6 +209,7 @@ private:
     cv::Mat mRcw;
     cv::Mat mtcw;
     cv::Mat mRwc;
+    /* 当前帧的相机光心在世界坐标系下的坐标 */
     cv::Mat mOw; //==mtwc
 };
 

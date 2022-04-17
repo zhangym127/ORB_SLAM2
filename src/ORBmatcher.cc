@@ -42,6 +42,22 @@ ORBmatcher::ORBmatcher(float nnratio, bool checkOri): mfNNratio(nnratio), mbChec
 {
 }
 
+/**
+ * @brief 搜索当前帧与vpMapPoints中匹配的Map点并添加到当前帧，只有mbTrackInView被设置为True的Map点才纳入匹配
+ * 
+ * 1. 对于vpMapPoints中的每一个Map点
+ *   a.只有mbTrackInView被设置为True的Map点才纳入匹配
+ *   b.以Frame::isInFrustum()中Map点3D-2D投影获得的像素坐标为中心，r为半径，返回当前帧指定范围内的特征点
+ *   c.取得Map点的BRIEF描述符
+ *   d.对于b中取到的每一个特征点，计算与Map点的描述符距离，记录最优和次优距离
+ * 2. 如果最优结果相对于次优结果的优势不明显则跳过，否则将该Map点添加为最优匹配特征点对应的Map点
+ * 3. 返回匹配的特征点数量，或新添加的Map点数量
+ * 
+ * @param F[in] 当前帧 
+ * @param vpMapPoints 待匹配的Map点
+ * @param th[in] 施加于搜索半径的系数 
+ * @return int 返回匹配的特征点数量
+ */
 int ORBmatcher::SearchByProjection(Frame &F, const vector<MapPoint*> &vpMapPoints, const float th)
 {
     int nmatches=0;
@@ -51,26 +67,33 @@ int ORBmatcher::SearchByProjection(Frame &F, const vector<MapPoint*> &vpMapPoint
     for(size_t iMP=0; iMP<vpMapPoints.size(); iMP++)
     {
         MapPoint* pMP = vpMapPoints[iMP];
+
+        /* 只有mbTrackInView被设置为True的Map点才纳入匹配 */
         if(!pMP->mbTrackInView)
             continue;
 
         if(pMP->isBad())
             continue;
 
+        /* 获得估计的Map点图像金字塔层级 */
         const int &nPredictedLevel = pMP->mnTrackScaleLevel;
 
+        /* 基于当前帧对该Map点的观测方向与该点的平均观测方向的夹角确定搜索半径 */
         // The size of the window will depend on the viewing direction
         float r = RadiusByViewingCos(pMP->mTrackViewCos);
 
+        /* 搜索半径乘以缩放系数 */
         if(bFactor)
             r*=th;
 
+        /* 以Frame::isInFrustum()中3D-2D投影获得的像素坐标为中心，r为半径，返回当前帧指定范围内的特征点 */
         const vector<size_t> vIndices =
                 F.GetFeaturesInArea(pMP->mTrackProjX,pMP->mTrackProjY,r*F.mvScaleFactors[nPredictedLevel],nPredictedLevel-1,nPredictedLevel);
 
         if(vIndices.empty())
             continue;
 
+        /* 获得当前Map点的BRIEF描述符 */
         const cv::Mat MPdescriptor = pMP->GetDescriptor();
 
         int bestDist=256;
@@ -79,15 +102,18 @@ int ORBmatcher::SearchByProjection(Frame &F, const vector<MapPoint*> &vpMapPoint
         int bestLevel2 = -1;
         int bestIdx =-1 ;
 
+        /* 遍历当前帧中找到的特征点，找到与关键帧Map点最匹配的特征点 */
         // Get best and second matches with near keypoints
         for(vector<size_t>::const_iterator vit=vIndices.begin(), vend=vIndices.end(); vit!=vend; vit++)
         {
             const size_t idx = *vit;
 
+            /* 如果该特征点已经有对应的Map点及其观测，则跳过 */
             if(F.mvpMapPoints[idx])
                 if(F.mvpMapPoints[idx]->Observations()>0)
                     continue;
 
+            /* 双目或RGBD时，需要确保右图的对应点也在搜索半径内 */
             if(F.mvuRight[idx]>0)
             {
                 const float er = fabs(pMP->mTrackProjXR-F.mvuRight[idx]);
@@ -95,10 +121,13 @@ int ORBmatcher::SearchByProjection(Frame &F, const vector<MapPoint*> &vpMapPoint
                     continue;
             }
 
+            /* 取得该特征点对应的描述符 */
             const cv::Mat &d = F.mDescriptors.row(idx);
 
+            /* 计算两个描述符的距离 */
             const int dist = DescriptorDistance(MPdescriptor,d);
 
+            /* 更新最优匹配结果，使用bestDist2和bestLevel2记录次优结果 */
             if(dist<bestDist)
             {
                 bestDist2=bestDist;
@@ -107,7 +136,7 @@ int ORBmatcher::SearchByProjection(Frame &F, const vector<MapPoint*> &vpMapPoint
                 bestLevel = F.mvKeysUn[idx].octave;
                 bestIdx=idx;
             }
-            else if(dist<bestDist2)
+            else if(dist<bestDist2) /* 更新次优匹配结果 */
             {
                 bestLevel2 = F.mvKeysUn[idx].octave;
                 bestDist2=dist;
@@ -117,19 +146,31 @@ int ORBmatcher::SearchByProjection(Frame &F, const vector<MapPoint*> &vpMapPoint
         // Apply ratio to second match (only if best and second are in the same scale level)
         if(bestDist<=TH_HIGH)
         {
+            /* 如果最优结果相比次优结果的优势并不明显则跳过 */
             if(bestLevel==bestLevel2 && bestDist>mfNNratio*bestDist2)
                 continue;
 
+            /* 添加该Map点到当前帧 */
             F.mvpMapPoints[bestIdx]=pMP;
             nmatches++;
         }
     }
 
+    /* 返回匹配的特征点数量 */
     return nmatches;
 }
 
+/**
+ * @brief 根据视角确定搜索半径，单位是像素
+ * 
+ * 如果夹角小于3.6度则返回2.5，否则返回4.0
+ * 
+ * @param viewCos 该Map点的观测方向与该点的平均观测方向的夹角的Cos值
+ * @return float 搜索半径，单位是像素
+ */
 float ORBmatcher::RadiusByViewingCos(const float &viewCos)
 {
+    /* 如果夹角小于3.6度则返回2.5，否则返回4.0 */
     if(viewCos>0.998)
         return 2.5;
     else

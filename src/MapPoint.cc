@@ -83,6 +83,13 @@ cv::Mat MapPoint::GetWorldPos()
     return mWorldPos.clone();
 }
 
+/**
+ * @brief 返回该Map点的平均观测方向
+ * 
+ * 所谓平均观测方向是指，能够观察到该点的所有观测方向的平均
+ * 
+ * @return cv::Mat 返回Map点的平均观测方向
+ */
 cv::Mat MapPoint::GetNormal()
 {
     unique_lock<mutex> lock(mMutexPos);

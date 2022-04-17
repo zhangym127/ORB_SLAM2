@@ -66,6 +66,11 @@ void Map::EraseKeyFrame(KeyFrame *pKF)
     // Delete the MapPoint
 }
 
+/**
+ * @brief 将vpMPs中的Map点设置为地图的参考Map点
+ * 
+ * @param vpMPs 待设置的Map点
+ */
 void Map::SetReferenceMapPoints(const vector<MapPoint *> &vpMPs)
 {
     unique_lock<mutex> lock(mMutexMap);
