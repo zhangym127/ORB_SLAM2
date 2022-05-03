@@ -236,18 +236,46 @@ bool MapPoint::isBad()
     return mbBad;
 }
 
+/**
+ * @brief 增加可见次数
+ * 
+ * 在SearchLocalPoints函数中，只要该点落在某一关键帧的视野范围内，都会调用本函数来
+ * 增加该点的可见次数。
+ * 
+ * 因此这里的visible的含义是该点预计被看到的图像帧数。
+ * 
+ * @param n 
+ */
 void MapPoint::IncreaseVisible(int n)
 {
     unique_lock<mutex> lock(mMutexFeatures);
     mnVisible+=n;
 }
 
+/**
+ * @brief 增加发现次数
+ * 
+ * 在重定位或者对当前帧的位姿优化之后会对当前帧的所有Map点根据优化后的位姿进行重映射，
+ * 重映射之后，偏差较大的设置为离点，偏差小于阈值的设置为内点，而所有的内点都会调用本
+ * 函数增加发现次数，表示该点被某一帧“发现”。
+ * 
+ * 因此这里的found的含义是指该点实际被看到的图像帧数。
+ * 
+ * @param n 增加的次数
+ */
 void MapPoint::IncreaseFound(int n)
 {
     unique_lock<mutex> lock(mMutexFeatures);
     mnFound+=n;
 }
 
+/**
+ * @brief 获取发现比例
+ * 
+ * 所谓发现比例是指：实际看到该Map点的图像帧数和预计看到该Map点的帧数之比
+ * 
+ * @return float 
+ */
 float MapPoint::GetFoundRatio()
 {
     unique_lock<mutex> lock(mMutexFeatures);
@@ -307,7 +335,7 @@ void MapPoint::ComputeDistinctiveDescriptors()
         }
     }
 
-    /* 找出到其他描述符距离最小的那个描述符 */
+    /* 找出到其他描述符距离最小的那个描述符，作为独特描述符 */
     // Take the descriptor with least median distance to the rest
     int BestMedian = INT_MAX;
     int BestIdx = 0;
@@ -346,6 +374,10 @@ int MapPoint::GetIndexInKeyFrame(KeyFrame *pKF)
         return -1;
 }
 
+/**
+ * @brief 确认当前Map点的观测中有关键帧pKF，或者说关键帧pKF能看到该Map点
+ * 
+ */
 bool MapPoint::IsInKeyFrame(KeyFrame *pKF)
 {
     unique_lock<mutex> lock(mMutexFeatures);
@@ -425,6 +457,13 @@ float MapPoint::GetMaxDistanceInvariance()
     return 1.2f*mfMaxDistance;
 }
 
+/**
+ * @brief 根据特征点到相机光心的距离估计所在的图像金字塔层级
+ * 
+ * @param currentDist 特征点到相机光心的距离
+ * @param pKF 关键帧
+ * @return int 图像金字塔层级
+ */
 int MapPoint::PredictScale(const float &currentDist, KeyFrame* pKF)
 {
     float ratio;

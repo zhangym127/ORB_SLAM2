@@ -30,11 +30,14 @@ namespace ORB_SLAM2
 {
 
 /** @brief 创建SLAM系统，初始化所有的系统线程，准备处理图像帧
-  * @param strVocFile 词典文件路径名
-  * @param strSettingsFile 设置文件路径名
-  * @param sensor 传感器类型：单目、双目、RGB-D
-  * @param bUseViewer 是否使用视图
-  */
+ * 
+ * 在Examples的具体例子中调用该构造函数创建具体的SLAM对象
+ *  
+ * @param strVocFile 词典文件路径名
+ * @param strSettingsFile 设置文件路径名
+ * @param sensor 传感器类型：单目、双目、RGB-D
+ * @param bUseViewer 是否使用视图
+ */
 System::System(const string &strVocFile, const string &strSettingsFile, const eSensor sensor,
                const bool bUseViewer):mSensor(sensor), mpViewer(static_cast<Viewer*>(NULL)), mbReset(false),mbActivateLocalizationMode(false),
         mbDeactivateLocalizationMode(false)
@@ -63,7 +66,7 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
        exit(-1);
     }
 
-
+    /* 创建ORB词典 */
     //Load ORB Vocabulary
     cout << endl << "Loading ORB Vocabulary. This could take a while..." << endl;
 
@@ -77,29 +80,36 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
     }
     cout << "Vocabulary loaded!" << endl << endl;
 
+    /* 创建关键帧数据库 */
     //Create KeyFrame Database
     mpKeyFrameDatabase = new KeyFrameDatabase(*mpVocabulary);
 
+    /* 创建Map */
     //Create the Map
     mpMap = new Map();
 
+    /* 创建绘图器，由Viewer使用 */
     //Create Drawers. These are used by the Viewer
     mpFrameDrawer = new FrameDrawer(mpMap);
     mpMapDrawer = new MapDrawer(mpMap, strSettingsFile);
 
+    /* 初始化跟踪线程 */
     //Initialize the Tracking thread
     //(it will live in the main thread of execution, the one that called this constructor)
     mpTracker = new Tracking(this, mpVocabulary, mpFrameDrawer, mpMapDrawer,
                              mpMap, mpKeyFrameDatabase, strSettingsFile, mSensor);
 
+    /* 初始化本地Map线程并启动 */
     //Initialize the Local Mapping thread and launch
     mpLocalMapper = new LocalMapping(mpMap, mSensor==MONOCULAR);
     mptLocalMapping = new thread(&ORB_SLAM2::LocalMapping::Run,mpLocalMapper);
 
+    /* 初始化回环闭合线程并启动 */
     //Initialize the Loop Closing thread and launch
     mpLoopCloser = new LoopClosing(mpMap, mpKeyFrameDatabase, mpVocabulary, mSensor!=MONOCULAR);
     mptLoopClosing = new thread(&ORB_SLAM2::LoopClosing::Run, mpLoopCloser);
 
+    /* 初始化Viewer线程并启动 */
     //Initialize the Viewer thread and launch
     if(bUseViewer)
     {
@@ -108,6 +118,7 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
         mpTracker->SetViewer(mpViewer);
     }
 
+    /* 设置线程之间相互访问的指针 */
     //Set pointers between threads
     mpTracker->SetLocalMapper(mpLocalMapper);
     mpTracker->SetLoopClosing(mpLoopCloser);

@@ -56,6 +56,12 @@ KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
     SetPose(F.mTcw);    
 }
 
+/**
+ * @brief 计算关键帧的词袋结构
+ * 
+ * FIXME: 词袋的含义有待进一步分析
+ * 
+ */
 void KeyFrame::ComputeBoW()
 {
     if(mBowVec.empty() || mFeatVec.empty())
@@ -107,13 +113,22 @@ cv::Mat KeyFrame::GetStereoCenter()
     return Cw.clone();
 }
 
-
+/**
+ * @brief 取得世界坐标系到相机坐标系的旋转
+ * 
+ * @return cv::Mat 旋转
+ */
 cv::Mat KeyFrame::GetRotation()
 {
     unique_lock<mutex> lock(mMutexPose);
     return Tcw.rowRange(0,3).colRange(0,3).clone();
 }
 
+/**
+ * @brief 取得世界坐标系到相机坐标系的平移
+ * 
+ * @return cv::Mat 平移
+ */
 cv::Mat KeyFrame::GetTranslation()
 {
     unique_lock<mutex> lock(mMutexPose);
@@ -171,6 +186,11 @@ set<KeyFrame*> KeyFrame::GetConnectedKeyFrames()
     return s;
 }
 
+/**
+ * @brief 取得与该关键帧具有共视关系的所有相邻帧
+ * 
+ * @return vector<KeyFrame*> 所有相邻帧
+ */
 vector<KeyFrame*> KeyFrame::GetVectorCovisibleKeyFrames()
 {
     unique_lock<mutex> lock(mMutexConnections);
@@ -265,6 +285,12 @@ set<MapPoint*> KeyFrame::GetMapPoints()
     return s;
 }
 
+/**
+ * @brief 返回关键帧中观测数量≥给定阈值的Map点数量
+ * 
+ * @param minObs 最小观测数量阈值
+ * @return int 关键帧中观测数量≥给定阈值的Map点数量
+ */
 int KeyFrame::TrackedMapPoints(const int &minObs)
 {
     unique_lock<mutex> lock(mMutexFeatures);
@@ -611,6 +637,14 @@ void KeyFrame::EraseConnection(KeyFrame* pKF)
         UpdateBestCovisibles();
 }
 
+/**
+ * @brief 获得关键帧上以(x,y)为中心，r为半径的圆内的所有特征点
+ * 
+ * @param x 中心点坐标
+ * @param y 中心点坐标
+ * @param r 圆半径
+ * @return vector<size_t> 特征点索引向量 
+ */
 vector<size_t> KeyFrame::GetFeaturesInArea(const float &x, const float &y, const float &r) const
 {
     vector<size_t> vIndices;

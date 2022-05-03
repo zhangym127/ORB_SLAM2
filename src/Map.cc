@@ -107,6 +107,11 @@ long unsigned int Map::MapPointsInMap()
     return mspMapPoints.size();
 }
 
+/**
+ * @brief 返回地图中关键帧的数量
+ * 
+ * @return long unsigned int 关键帧的总数
+ */
 long unsigned int Map::KeyFramesInMap()
 {
     unique_lock<mutex> lock(mMutexMap);

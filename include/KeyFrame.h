@@ -121,7 +121,7 @@ public:
 public:
 
     static long unsigned int nNextId;
-    long unsigned int mnId;
+    long unsigned int mnId; // 帧ID
     const long unsigned int mnFrameId;
 
     const double mTimeStamp;
@@ -193,9 +193,9 @@ public:
 protected:
 
     // SE3 Pose and camera center
-    cv::Mat Tcw;
-    cv::Mat Twc;
-    cv::Mat Ow;
+    cv::Mat Tcw; // 世界坐标系到相机坐标系的位姿变换
+    cv::Mat Twc; // 相机坐标系到世界坐标系的位姿变换
+    cv::Mat Ow;  // 当前帧的相机光心在世界坐标系下的坐标
 
     cv::Mat Cw; // Stereo middel point. Only for visualization
 

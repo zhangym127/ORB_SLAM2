@@ -289,6 +289,11 @@ void Frame::SetPose(cv::Mat Tcw)
     UpdatePoseMatrices();
 }
 
+/**
+ * @brief 更新当前帧的位姿矩阵
+ * 
+ * 更新当前帧与世界坐标系之间的旋转、平移和相机光心坐标等变量
+ */
 void Frame::UpdatePoseMatrices()
 { 
     mRcw = mTcw.rowRange(0,3).colRange(0,3);

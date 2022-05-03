@@ -206,11 +206,10 @@ private:
     void AssignFeaturesToGrid();
 
     // Rotation, translation and camera center
-    cv::Mat mRcw;
-    cv::Mat mtcw;
-    cv::Mat mRwc;
-    /* 当前帧的相机光心在世界坐标系下的坐标 */
-    cv::Mat mOw; //==mtwc
+    cv::Mat mRcw; // 世界坐标系到相机坐标系的旋转
+    cv::Mat mtcw; // 世界坐标系到相机坐标系的平移
+    cv::Mat mRwc; // 相机坐标系到世界坐标系的旋转
+    cv::Mat mOw; // 当前帧的相机光心在世界坐标系下的坐标 ==mtwc
 };
 
 }// namespace ORB_SLAM

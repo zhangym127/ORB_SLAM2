@@ -48,14 +48,14 @@ namespace ORB_SLAM2
  */
 void Optimizer::GlobalBundleAdjustemnt(Map* pMap, int nIterations, bool* pbStopFlag, const unsigned long nLoopKF, const bool bRobust)
 {
-    /* 取得Map中所有的额关键帧和Map点，开始BA优化 */
+    /* 取得Map中所有关键帧和Map点，开始BA优化 */
     vector<KeyFrame*> vpKFs = pMap->GetAllKeyFrames();
     vector<MapPoint*> vpMP = pMap->GetAllMapPoints();
     BundleAdjustment(vpKFs,vpMP,nIterations,pbStopFlag, nLoopKF, bRobust);
 }
 
 /**
- * @brief BA优化
+ * @brief BA优化，对指定关键帧的位姿和指定Map点的坐标进行优化
  * 
  * 1. 初始化g2o优化器
  * 2. 将所有的关键帧位姿作为顶点添加到优化器
@@ -287,7 +287,7 @@ void Optimizer::BundleAdjustment(const vector<KeyFrame *> &vpKFs, const vector<M
 }
 
 /**
- * @brief 位姿优化
+ * @brief 位姿优化，对指定关键帧的位姿进行优化
  * 
  * 1. 初始化g2o优化器
  * 2. 将当前帧的位姿作为顶点添加到优化器，并且只有这一个顶点
@@ -535,13 +535,36 @@ int Optimizer::PoseOptimization(Frame *pFrame)
     return nInitialCorrespondences-nBad;
 }
 
+/**
+ * @brief 进行本地Map的BA，对本地关键帧的位姿和本地Map点的坐标进行优化
+ * 
+ * 1. 取得所有的本地关键帧，包括当前关键帧及其所有具有共视关系的相邻帧
+ * 2. 取得所有的本地Map点，即所有本地关键帧的Map点
+ * 3. 取得所有能够看到本地Map点，但是并不属于本地关键帧的关键帧
+ * 4. 构造g2o优化器
+ * 5. 将所有本地关键帧位姿作为顶点添加到优化器
+ * 6. 将所有能够看到本地Map点但是并不属于本地关键帧的关键帧位姿作为顶点添加优化器，但是锁定位姿，不能被优化
+ * 7. 将所有的Map点作为顶点添加到优化器
+ *   a. 取得每个Map点的所有观测
+ *   b. 将从Map点到观测帧特征点的投影作为边添加到优化器
+ * 8. 进行第一次优化
+ * 9. 剔除离点及其核函数
+ * 10. 进行第二次优化
+ * 11. 删除离点
+ * 12. 用优化后的结果更新关键帧位姿和Map点坐标
+ * 
+ * @param pKF 当前关键帧
+ * @param pbStopFlag 是否停止BA的标志位
+ * @param pMap 本地Map
+ */
 void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap)
 {    
     // Local KeyFrames: First Breath Search from Current Keyframe
     list<KeyFrame*> lLocalKeyFrames;
 
+    /* 取得所有的本地关键帧：将当前关键帧及其所有具有共视关系的相邻帧添加到lLocalKeyFrames中 */
     lLocalKeyFrames.push_back(pKF);
-    pKF->mnBALocalForKF = pKF->mnId;
+    pKF->mnBALocalForKF = pKF->mnId; //mnBALocalForKF的唯一作用是避免重复添加
 
     const vector<KeyFrame*> vNeighKFs = pKF->GetVectorCovisibleKeyFrames();
     for(int i=0, iend=vNeighKFs.size(); i<iend; i++)
@@ -552,6 +575,7 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
             lLocalKeyFrames.push_back(pKFi);
     }
 
+    /* 取得所有的本地Map点：将当前关键帧及其相邻关键帧的所有Map点添加到lLocalMapPoints中 */
     // Local MapPoints seen in Local KeyFrames
     list<MapPoint*> lLocalMapPoints;
     for(list<KeyFrame*>::iterator lit=lLocalKeyFrames.begin() , lend=lLocalKeyFrames.end(); lit!=lend; lit++)
@@ -565,11 +589,12 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
                     if(pMP->mnBALocalForKF!=pKF->mnId)
                     {
                         lLocalMapPoints.push_back(pMP);
-                        pMP->mnBALocalForKF=pKF->mnId;
+                        pMP->mnBALocalForKF=pKF->mnId; // 防止重复添加
                     }
         }
     }
 
+    /* 取得所有能够看到本地Map点，但是并不属于本地关键帧的关键帧，添加到lFixedCameras中 */
     // Fixed Keyframes. Keyframes that see Local MapPoints but that are not Local Keyframes
     list<KeyFrame*> lFixedCameras;
     for(list<MapPoint*>::iterator lit=lLocalMapPoints.begin(), lend=lLocalMapPoints.end(); lit!=lend; lit++)
@@ -588,6 +613,7 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
         }
     }
 
+    /* 构造g2o优化器 */
     // Setup optimizer
     g2o::SparseOptimizer optimizer;
     g2o::BlockSolver_6_3::LinearSolverType * linearSolver;
@@ -599,11 +625,13 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
     g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
     optimizer.setAlgorithm(solver);
 
+    /* 设置Stop标志，以便需要时停止优化 */
     if(pbStopFlag)
         optimizer.setForceStopFlag(pbStopFlag);
 
     unsigned long maxKFid = 0;
 
+    /* 将所有本地关键帧作为顶点添加到优化器，各自的位姿作为估计值添加到顶点 */
     // Set Local KeyFrame vertices
     for(list<KeyFrame*>::iterator lit=lLocalKeyFrames.begin(), lend=lLocalKeyFrames.end(); lit!=lend; lit++)
     {
@@ -611,12 +639,13 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
         g2o::VertexSE3Expmap * vSE3 = new g2o::VertexSE3Expmap();
         vSE3->setEstimate(Converter::toSE3Quat(pKFi->GetPose()));
         vSE3->setId(pKFi->mnId);
-        vSE3->setFixed(pKFi->mnId==0);
+        vSE3->setFixed(pKFi->mnId==0); //Id为0的关键帧不参与优化
         optimizer.addVertex(vSE3);
         if(pKFi->mnId>maxKFid)
             maxKFid=pKFi->mnId;
     }
 
+    /* 将所有能够看到本地Map点但是并不属于本地关键帧的关键帧作为顶点添加优化器，但是位姿锁定，不能被优化 */
     // Set Fixed KeyFrame vertices
     for(list<KeyFrame*>::iterator lit=lFixedCameras.begin(), lend=lFixedCameras.end(); lit!=lend; lit++)
     {
@@ -654,6 +683,7 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
     const float thHuberMono = sqrt(5.991);
     const float thHuberStereo = sqrt(7.815);
 
+    /* 将所有的Map点作为顶点添加到优化器，点的世界坐标作为估计值添加到优化器 */
     for(list<MapPoint*>::iterator lit=lLocalMapPoints.begin(), lend=lLocalMapPoints.end(); lit!=lend; lit++)
     {
         MapPoint* pMP = *lit;
@@ -664,8 +694,10 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
         vPoint->setMarginalized(true);
         optimizer.addVertex(vPoint);
 
+        /* 取得每个Map点的所有观测 */
         const map<KeyFrame*,size_t> observations = pMP->GetObservations();
 
+        /* 遍历所有的观测，将从Map点到观测帧特征点的投影作为边添加到优化器，具体方法与BundleAdjustment完全一致，参见之 */
         //Set edges
         for(map<KeyFrame*,size_t>::const_iterator mit=observations.begin(), mend=observations.end(); mit!=mend; mit++)
         {
@@ -673,6 +705,7 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
 
             if(!pKFi->isBad())
             {                
+                /* 取得Map点对应的特征点坐标 */
                 const cv::KeyPoint &kpUn = pKFi->mvKeysUn[mit->second];
 
                 // Monocular observation
@@ -699,9 +732,9 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
                     e->cy = pKFi->cy;
 
                     optimizer.addEdge(e);
-                    vpEdgesMono.push_back(e);
+                    vpEdgesMono.push_back(e);  //所有的单目边
                     vpEdgeKFMono.push_back(pKFi);
-                    vpMapPointEdgeMono.push_back(pMP);
+                    vpMapPointEdgeMono.push_back(pMP); //单目边对应的Map点
                 }
                 else // Stereo observation
                 {
@@ -741,6 +774,7 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
         if(*pbStopFlag)
             return;
 
+    /* 开始第一次优化 */
     optimizer.initializeOptimization();
     optimizer.optimize(5);
 
@@ -753,6 +787,7 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
     if(bDoMore)
     {
 
+    /* 第一次优化完成后剔除离点及其鲁棒核函数 */
     // Check inlier observations
     for(size_t i=0, iend=vpEdgesMono.size(); i<iend;i++)
     {
@@ -764,10 +799,10 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
 
         if(e->chi2()>5.991 || !e->isDepthPositive())
         {
-            e->setLevel(1);
+            e->setLevel(1); //设置为离点
         }
 
-        e->setRobustKernel(0);
+        e->setRobustKernel(0); //剔除离点后不再需要鲁棒核函数
     }
 
     for(size_t i=0, iend=vpEdgesStereo.size(); i<iend;i++)
@@ -780,21 +815,24 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
 
         if(e->chi2()>7.815 || !e->isDepthPositive())
         {
-            e->setLevel(1);
+            e->setLevel(1); //设置为离点
         }
 
-        e->setRobustKernel(0);
+        e->setRobustKernel(0); //剔除离点后不再需要鲁棒核函数
     }
 
-    // Optimize again without the outliers
+    /* 开始第二次优化 */
 
+    // Optimize again without the outliers
     optimizer.initializeOptimization(0);
     optimizer.optimize(10);
 
-    }
+    } //if(bDoMore)
 
     vector<pair<KeyFrame*,MapPoint*> > vToErase;
     vToErase.reserve(vpEdgesMono.size()+vpEdgesStereo.size());
+
+    /* 第二次优化完成后，找出所有的离点 */
 
     // Check inlier observations       
     for(size_t i=0, iend=vpEdgesMono.size(); i<iend;i++)
@@ -830,6 +868,7 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
     // Get Map Mutex
     unique_lock<mutex> lock(pMap->mMutexMapUpdate);
 
+    /* 删除所有的离点 */
     if(!vToErase.empty())
     {
         for(size_t i=0;i<vToErase.size();i++)
@@ -843,6 +882,7 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
 
     // Recover optimized data
 
+    /* 用优化后的精确位姿更新关键帧的位姿 */
     //Keyframes
     for(list<KeyFrame*>::iterator lit=lLocalKeyFrames.begin(), lend=lLocalKeyFrames.end(); lit!=lend; lit++)
     {
@@ -852,6 +892,7 @@ void Optimizer::LocalBundleAdjustment(KeyFrame *pKF, bool* pbStopFlag, Map* pMap
         pKF->SetPose(Converter::toCvMat(SE3quat));
     }
 
+    /* 用优化后的精确坐标更新Map点的坐标 */
     //Points
     for(list<MapPoint*>::iterator lit=lLocalMapPoints.begin(), lend=lLocalMapPoints.end(); lit!=lend; lit++)
     {
