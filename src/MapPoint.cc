@@ -31,7 +31,7 @@ mutex MapPoint::mGlobalMutex;
 
 MapPoint::MapPoint(const cv::Mat &Pos, KeyFrame *pRefKF, Map* pMap):
     mnFirstKFid(pRefKF->mnId), mnFirstFrame(pRefKF->mnFrameId), nObs(0), mnTrackReferenceForFrame(0),
-    mnLastFrameSeen(0), mnBALocalForKF(0), mnFuseCandidateForKF(0), mnLoopPointForKF(0), mnCorrectedByKF(0),
+    mnLastFrameSeen(0), mnBALocalForKF(0), mnFuseCandidateForKF(0), mnLoopPointForKF(0), (0),
     mnCorrectedReference(0), mnBAGlobalForKF(0), mpRefKF(pRefKF), mnVisible(1), mnFound(1), mbBad(false),
     mpReplaced(static_cast<MapPoint*>(NULL)), mfMinDistance(0), mfMaxDistance(0), mpMap(pMap)
 {
@@ -189,6 +189,15 @@ MapPoint* MapPoint::GetReplaced()
     return mpReplaced;
 }
 
+/**
+ * @brief 用新的Map点来替换本Map点，抹去本Map点的所有痕迹
+ * 
+ * 将本Map点的所有观测帧中的记录的本Map点替换成pMP
+ * 本Map点的相关信息转移到pMP
+ * 从地图中删除本Map点
+ * 
+ * @param pMP 新的Map点
+ */
 void MapPoint::Replace(MapPoint* pMP)
 {
     if(pMP->mnId==this->mnId)
@@ -207,25 +216,33 @@ void MapPoint::Replace(MapPoint* pMP)
         mpReplaced = pMP;
     }
 
+    /* 遍历本Map点的所有观测帧 */
     for(map<KeyFrame*,size_t>::iterator mit=obs.begin(), mend=obs.end(); mit!=mend; mit++)
     {
         // Replace measurement in keyframe
-        KeyFrame* pKF = mit->first;
+        KeyFrame* pKF = mit->first; //取得观测中的关键帧
 
+        /* 如果pKF看不到pMP，将pKF中的本Map点替换成pMP */
         if(!pMP->IsInKeyFrame(pKF))
         {
+            /* 将pKF中记录的本Map点替换成pMP，mit->second是本Map点在pKF中对应特征点的序号 */
             pKF->ReplaceMapPointMatch(mit->second, pMP);
+            /* 在pMP的观测帧中加入pKF */
             pMP->AddObservation(pKF,mit->second);
+            /* 至此，本Map与pKF再无任何关系 */
         }
-        else
+        else /* 如果pKF能看到pMP，则直接从pKF中删除本Map点 */
         {
             pKF->EraseMapPointMatch(mit->second);
         }
     }
+    /* 本Map点的信息转移到pMP */
     pMP->IncreaseFound(nfound);
     pMP->IncreaseVisible(nvisible);
+    /* 更新pMP的独特描述符 */
     pMP->ComputeDistinctiveDescriptors();
 
+    /* 从地图中抹去本Map点 */
     mpMap->EraseMapPoint(this);
 }
 

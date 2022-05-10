@@ -45,7 +45,7 @@ void LocalMapping::SetTracker(Tracking *pTracker)
 }
 
 /**
- * @brief 本地Map的主循环
+ * @brief 本地Map线程的主循环
  * 
  * 在System::System()中创建本地Map线程并启动，然后进入这个主循环，处理Tracking中新添加的关键帧，
  * 为关键帧构造Map点，添加到本地Map，所有关键帧添加完成后进行本地Map的BA优化，更新关键帧位姿，更新Map点坐标
@@ -57,7 +57,8 @@ void LocalMapping::SetTracker(Tracking *pTracker)
  * 2. 对当前关键帧和一级、二级相邻关键帧之间重复的Map点进行融合
  * 3. 进行本地Map的BA优化，对本地关键帧的位姿和本地Map点的坐标进行优化
  * 4. 剔除冗余关键帧
- * 5. 将当前关键帧添加到回环检测中
+ * 5. 将当前关键帧添加到LoopCloser中，【注意】这是LoopCloser的唯一输入，
+ *    添加到LocalMapper的所有关键帧都会被添加到LoopCloser，并同步添加到关键帧数据库
  */
 void LocalMapping::Run()
 {
@@ -112,7 +113,7 @@ void LocalMapping::Run()
                 KeyFrameCulling();
             }
 
-            /* 将当前关键帧添加到回环检测中 */
+            /* 将当前关键帧添加到回环检测中，【注意】这是LoopCloser的唯一输入 */
             mpLoopCloser->InsertKeyFrame(mpCurrentKeyFrame);
         }
         else if(Stop())

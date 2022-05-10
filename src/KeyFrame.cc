@@ -89,6 +89,11 @@ void KeyFrame::SetPose(const cv::Mat &Tcw_)
     Cw = Twc*center;
 }
 
+/**
+ * @brief 返回关键帧的位姿，即从世界坐标系到相机坐标系的变换关系
+ * 
+ * @return cv::Mat 从世界坐标系到相机坐标系的变换关系
+ */
 cv::Mat KeyFrame::GetPose()
 {
     unique_lock<mutex> lock(mMutexPose);
@@ -177,6 +182,11 @@ void KeyFrame::UpdateBestCovisibles()
     mvOrderedWeights = vector<int>(lWs.begin(), lWs.end());    
 }
 
+/**
+ * @brief 取得与当前关键帧有连接关系的所有关键帧
+ * 
+ * @return set<KeyFrame*> 有连接关系的所有关键帧
+ */
 set<KeyFrame*> KeyFrame::GetConnectedKeyFrames()
 {
     unique_lock<mutex> lock(mMutexConnections);
@@ -213,6 +223,12 @@ vector<KeyFrame*> KeyFrame::GetBestCovisibilityKeyFrames(const int &N)
 
 }
 
+/**
+ * @brief 获得与该关键帧有连接的关键帧，权重值必须＞w，权重是共视点的个数
+ * 
+ * @param w 权重值
+ * @return vector<KeyFrame*> 权重值＞w的有连接关键帧
+ */
 vector<KeyFrame*> KeyFrame::GetCovisiblesByWeight(const int &w)
 {
     unique_lock<mutex> lock(mMutexConnections);

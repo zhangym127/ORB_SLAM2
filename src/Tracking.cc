@@ -317,7 +317,7 @@ cv::Mat Tracking::GrabImageMonocular(const cv::Mat &im, const double &timestamp)
  *   a. 获得当前帧相对于上一帧的位姿变换，作为新的运动模型
  *   b. 删除那些观测为零的Map点，即无效的Map点
  *   c. 删除跟踪运动模型时添加的临时Map点，仅仅用于提高双目或RGBD的跟踪效果，用完即删除
- *   d. 检查、并插入一个新的关键帧
+ *   d. 如果必要则创建一个新的关键帧，并将关键帧添加到LocalMapper
  * 5. 如果初始化之后很快就丢失定位则进行系统复位，并返回
  * 6. 记录当前帧的位姿信息，用于轨迹复现
  */
@@ -575,7 +575,7 @@ void Tracking::Track()
             }
             mlpTemporalPoints.clear();
 
-            /* 检查是否需要插入一个新的关键帧 */
+            /* 如果必要，则创建一个新的关键帧，并将关键帧添加到LocalMapper */
             // Check if we need to insert a new keyframe
             if(NeedNewKeyFrame())
                 CreateNewKeyFrame();
@@ -910,10 +910,11 @@ void Tracking::CreateInitialMapMonocular()
         }
     }
 
-    /* 更新若干变量 */
+    /* 将初始帧和当前帧作为关键帧插入到LocalMapper中，LocalMapper将启动工作*/
     mpLocalMapper->InsertKeyFrame(pKFini);
     mpLocalMapper->InsertKeyFrame(pKFcur);
 
+    /* 更新若干变量 */
     mCurrentFrame.SetPose(pKFcur->GetPose());
     mnLastKeyFrameId=mCurrentFrame.mnId;
     mpLastKeyFrame = pKFcur;
@@ -1386,12 +1387,12 @@ bool Tracking::NeedNewKeyFrame()
 }
 
 /**
- * @brief 创建一个关键帧
+ * @brief 创建一个关键帧，并将关键帧添加到LocalMapper
  * 
  * 1. 将当前帧构造为关键帧
  * 2. 将新建的关键帧设置为当前帧的参考关键帧
  * 3. 对于双目和RGBD，构造一些Map点，确保至少有100个Map点
- * 4. 将新创建的关键帧插入本地Map
+ * 4. 将新创建的关键帧插入LocalMapper，【注意】这是初始化完成后LocalMapper的唯一输入
  * 5. 更新上一关键帧指针变量为当前关键帧
  */
 void Tracking::CreateNewKeyFrame()
@@ -1474,10 +1475,10 @@ void Tracking::CreateNewKeyFrame()
         }
     }
 
-    /* 将新创建的关键帧插入本地Map */
+    /* 将新创建的关键帧插入LocalMapper，LocalMapper将启动工作，【注意】这是初始化完成后LocalMapper的唯一输入 */
     mpLocalMapper->InsertKeyFrame(pKF);
 
-    /* 取消防止本地Map被冻结的标志 */
+    /* 取消防止LocalMapper被冻结的标志 */
     mpLocalMapper->SetNotStop(false);
 
     /* 更新上一关键帧为当前关键帧 */
